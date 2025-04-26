@@ -1,5 +1,29 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+// Toast Notification component
+const Toast = ({ message, onClose }: { message: string; onClose: () => void }) => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 5000);
+    
+    return () => clearTimeout(timer);
+  }, [onClose]);
+  
+  return (
+    <div className="fixed bottom-8 right-8 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg border border-gray-700 flex items-center space-x-3 animate-fade-in z-50">
+      <div className="text-green-400">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <p>{message}</p>
+    </div>
+  );
+};
 
 interface AnalysisResult {
   language: string;
@@ -15,6 +39,7 @@ interface AnalysisResult {
     loops: number;
     conditionals: number;
   };
+  documented_code: string;
 }
 
 interface ApiResponse {
@@ -31,6 +56,7 @@ interface ApiResponse {
     loops: number;
     conditionals: number;
   };
+  documented_code: string;
   error?: string;
 }
 
@@ -41,12 +67,49 @@ interface FileItem {
 
 function App() {
   const [code, setCode] = useState('');
+  const [inputLanguage, setInputLanguage] = useState('text');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  // Update input language when code changes
+  useEffect(() => {
+    // Simple language detection based on code content for input highlighting
+    if (code.includes('import React') || code.includes('from \'react\'')) {
+      if (code.includes('interface ') || code.includes('type ')) {
+        setInputLanguage('tsx');
+      } else {
+        setInputLanguage('jsx');
+      }
+    } else if (code.includes('function ') || code.includes('const ') || code.includes('let ')) {
+      if (code.includes('interface ') || code.includes('type ')) {
+        setInputLanguage('typescript');
+      } else {
+        setInputLanguage('javascript');
+      }
+    } else if ((code.includes('def ') || code.includes('import ')) && code.includes('if __name__')) {
+      setInputLanguage('python');
+    } else if ((code.includes('public class ') || code.includes('private ')) && code.includes(';')) {
+      setInputLanguage('java');
+    } else if (code.startsWith('<!DOCTYPE html>') || code.includes('<html')) {
+      setInputLanguage('html');
+    } else if (code.includes('{') && code.includes('}') && code.includes(':') && code.includes(';')) {
+      setInputLanguage('css');
+    } else if (code.trim().startsWith('{') && code.trim().endsWith('}')) {
+      try {
+        JSON.parse(code);
+        setInputLanguage('json');
+      } catch (e) {
+        // Not valid JSON
+      }
+    }
+  }, [code]);
 
   const handleClear = () => {
     setCode('');
@@ -139,7 +202,8 @@ function App() {
         setResult({
           language: response.data.language,
           explanation: response.data.explanation,
-          structure: response.data.structure
+          structure: response.data.structure,
+          documented_code: response.data.documented_code
         });
       }
     } catch (err) {
@@ -148,6 +212,50 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(
+      () => {
+        // Show toast instead of alert
+        setToastMessage('Code copied to clipboard!');
+        setShowToast(true);
+      },
+      (err) => {
+        console.error('Could not copy text: ', err);
+        setToastMessage('Failed to copy code');
+        setShowToast(true);
+      }
+    );
+  };
+
+  const closeToast = () => {
+    setShowToast(false);
+  };
+
+  // Function to determine the language for syntax highlighting
+  const getSyntaxHighlightLanguage = (language: string): string => {
+    // Map our language detection to syntax highlighter's language names
+    const languageMap: { [key: string]: string } = {
+      'JavaScript': 'javascript',
+      'TypeScript': 'typescript',
+      'JavaScript React': 'jsx',
+      'TypeScript React': 'tsx',
+      'Python': 'python',
+      'Java': 'java',
+      'C#': 'csharp',
+      'C++': 'cpp',
+      'HTML': 'html',
+      'CSS': 'css',
+      'JSON': 'json',
+      'YAML': 'yaml',
+      'XML': 'xml',
+      'Markdown': 'markdown',
+      'Environment Variables': 'bash',
+      'Plain Text': 'text'
+    };
+    
+    return languageMap[language] || 'text';
   };
 
   return (
@@ -220,12 +328,44 @@ function App() {
             </div>
           )}
           
-          <textarea
-            className="w-full h-64 p-4 bg-gray-900 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-100 font-mono text-sm resize-none"
-            placeholder="Paste your code here..."
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-          />
+          <div className="relative border border-gray-700 rounded-lg overflow-hidden" style={{ height: '256px' }}>
+            {/* Highlighted code layer */}
+            <div
+              ref={highlightRef}
+              className="absolute inset-0 pointer-events-none overflow-auto"
+            >
+              <SyntaxHighlighter
+                language={inputLanguage}
+                style={vscDarkPlus}
+                showLineNumbers={true}
+                wrapLines={true}
+                wrapLongLines={true}
+                customStyle={{
+                  margin: 0,
+                  padding: '16px',
+                  background: 'transparent',
+                  fontSize: '0.875rem',
+                  fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
+                }}
+              >
+                {code || '\n'}
+              </SyntaxHighlighter>
+            </div>
+
+            {/* Textarea layer */}
+            <textarea
+              className="absolute inset-0 w-full h-full p-4 bg-transparent text-transparent resize-none outline-none font-mono text-sm"
+              placeholder="Paste your code here..."
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onScroll={(e) => {
+                if (highlightRef.current) {
+                  highlightRef.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
+                }
+              }}
+              style={{ caretColor: 'white' }}
+            />
+          </div>
           
           <button
             onClick={analyzeCode}
@@ -307,10 +447,48 @@ function App() {
                 <h3 className="text-lg font-medium text-gray-300 mb-2">Explanation</h3>
                 <p className="text-gray-300 leading-relaxed whitespace-pre-line">{result.explanation}</p>
               </div>
+
+              <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-medium text-gray-300">Documented Code</h3>
+                  <button 
+                    onClick={() => copyToClipboard(result.documented_code)}
+                    className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
+                  >
+                    Copy Code
+                  </button>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-gray-700">
+                  <SyntaxHighlighter 
+                    language={getSyntaxHighlightLanguage(result.language)}
+                    style={vscDarkPlus}
+                    showLineNumbers={true}
+                    customStyle={{
+                      margin: 0,
+                      padding: '16px',
+                      borderRadius: 0,
+                      background: 'rgb(15, 23, 42)' // Tailwind bg-gray-950
+                    }}
+                    codeTagProps={{
+                      style: {
+                        fontSize: '0.875rem',
+                        fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
+                      }
+                    }}
+                  >
+                    {result.documented_code}
+                  </SyntaxHighlighter>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
+      
+      {/* Toast notification */}
+      {showToast && (
+        <Toast message={toastMessage} onClose={closeToast} />
+      )}
     </div>
   );
 }

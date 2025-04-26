@@ -1,42 +1,97 @@
-# CodeScope
+# CodeLens
 
-CodeScope is a web tool that helps users understand code by automatically detecting programming languages and generating clear explanations of what the code does.
+![CodeLens Logo](https://via.placeholder.com/150) <!-- Replace with actual logo if available -->
 
-## Features
-- Code upload or paste functionality
-- Automatic language detection
-- Code explanation generation
-- Clean and responsive UI
+A modern web application that provides a comprehensive code analysis and visualization platform. Built with a React TypeScript frontend and Python Flask backend.
 
-## Tech Stack
-- Frontend: React.js + Tailwind CSS
-- Backend: Flask (Python)
-- Language Detection: guesslang
-- Code Summary: Custom logic with transformers
+## 🚀 Features
 
-## Project Structure
-```
-codescope/
-├── frontend/          # React frontend application
-└── backend/          # Flask backend API
-```
+- **Code Analysis**: Analyze your code with advanced algorithms
+- **Visualization**: Get beautiful visual representations of your code
+- **Real-time Processing**: Fast and efficient code processing
+- **Modern UI**: Clean and intuitive user interface
+- **Responsive Design**: Works seamlessly across all devices
 
-## Setup Instructions
+## 🛠️ Tech Stack
 
-### Backend Setup
-1. Navigate to the backend directory
-2. Create a virtual environment: `python -m venv venv`
-3. Activate the virtual environment:
-   - Windows: `venv\Scripts\activate`
-   - Unix/MacOS: `source venv/bin/activate`
-4. Install dependencies: `pip install -r requirements.txt`
-5. Run the server: `python app.py`
+### Frontend
+- React with TypeScript
+- Tailwind CSS for styling
+- Modern UI components
+- Responsive design
+
+### Backend
+- Python Flask
+- RESTful API architecture
+- Efficient code processing
+- Secure data handling
+
+## 📦 Installation
+
+### Prerequisites
+- Node.js (v14 or higher)
+- Python (v3.8 or higher)
+- npm or yarn
 
 ### Frontend Setup
-1. Navigate to the frontend directory
-2. Install dependencies: `npm install`
-3. Start the development server: `npm start`
+```bash
+cd frontend
+npm install
+npm start
+```
 
-## Development
-- Frontend runs on http://localhost:3000
-- Backend API runs on http://localhost:5000 
+### Backend Setup
+```bash
+cd backend
+pip install -r requirements.txt
+python app.py
+```
+
+## 🔧 Configuration
+
+1. Clone the repository:
+```bash
+git clone https://github.com/mr-veeru/CodeLens.git
+cd CodeLens
+```
+
+2. Install dependencies for both frontend and backend
+3. Configure environment variables if needed
+4. Start both frontend and backend servers
+
+## 📝 Usage
+
+1. Start the application
+2. Upload your code files
+3. Get instant analysis and visualization
+4. Export results as needed
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 👥 Authors
+
+- **Veeru** - *Initial work* - [mr-veeru](https://github.com/mr-veeru)
+
+## 🙏 Acknowledgments
+
+- Thanks to all contributors
+- Open source community
+- Modern web technologies
+
+## 📞 Contact
+
+Veeru - [@yourtwitter](https://twitter.com/yourtwitter)
+
+Project Link: [https://github.com/mr-veeru/CodeLens](https://github.com/mr-veeru/CodeLens) 

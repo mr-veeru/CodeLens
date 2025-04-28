@@ -1,6 +1,11 @@
 {
   "dependencies": {
     "@types/react-syntax-highlighter": "^15.5.13",
+    "prismjs": "^1.30.0",
+    "react-simple-code-editor": "^0.14.1",
     "react-syntax-highlighter": "^15.6.1"
+  },
+  "devDependencies": {
+    "@types/prismjs": "^1.26.5"
   }
 }

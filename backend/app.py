@@ -6,9 +6,75 @@ import re
 import json
 import os
 from pathlib import Path
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import logging
+from logging.handlers import RotatingFileHandler
+from functools import wraps
+import time
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=3)
+handler.setFormatter(logging.Formatter(
+    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+))
+logger.addHandler(handler)
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# Configure CORS with specific origins
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "methods": ["GET", "POST"],
+        "allow_headers": ["Content-Type"]
+    },
+    r"/analyze": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "methods": ["POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
+
+# Configure rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+# Error handling decorator
+def handle_errors(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {f.__name__}: {str(e)}")
+            return jsonify({"error": "An internal server error occurred"}), 500
+    return decorated_function
+
+# Input validation decorator
+def validate_input(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 400
+        
+        data = request.get_json()
+        if not data or 'code' not in data:
+            return jsonify({"error": "Missing required field: code"}), 400
+        
+        if not isinstance(data['code'], str):
+            return jsonify({"error": "Code must be a string"}), 400
+        
+        if len(data['code']) > 1000000:  # 1MB limit
+            return jsonify({"error": "Code size exceeds limit"}), 413
+            
+        return f(*args, **kwargs)
+    return decorated_function
 
 def detect_file_type(filename: str, content: str) -> str:
     """Detect file type based on extension and content."""
@@ -558,36 +624,47 @@ def generate_documented_code(code: str, language: str, structure: dict) -> str:
     return '\n'.join(documented_lines)
 
 @app.route('/api/analyze', methods=['POST'])
+@limiter.limit("10 per minute")
+@handle_errors
+@validate_input
 def analyze_code():
+    start_time = time.time()
+    data = request.get_json()
+    code = data['code']
+    filename = data.get('filename', '')
+    
     try:
-        data = request.json
-        code = data.get('code', '')
-        filename = data.get('filename', '')  # Get filename if provided
-        
-        if not code:
-            return jsonify({'error': 'No code provided'}), 400
-        
-        # Detect language/file type
-        language = detect_file_type(filename, code)
+        # Detect file type
+        file_type = detect_file_type(filename, code)
         
         # Analyze code structure
-        structure = analyze_code_structure(code, language)
+        structure = analyze_code_structure(code, file_type)
         
         # Generate explanation
-        explanation = generate_code_explanation(code, language, structure)
+        explanation = generate_code_explanation(code, file_type, structure)
         
         # Generate documented code
-        documented_code = generate_documented_code(code, language, structure)
+        documented_code = generate_documented_code(code, file_type, structure)
+        
+        response_time = time.time() - start_time
+        logger.info(f"Analysis completed in {response_time:.2f} seconds for file: {filename}")
         
         return jsonify({
-            'language': language,
-            'explanation': explanation,
-            'structure': structure,
-            'documented_code': documented_code
+            "language": file_type,
+            "explanation": explanation,
+            "structure": structure,
+            "documented_code": documented_code
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error analyzing code: {str(e)}")
+        return jsonify({"error": "Failed to analyze code"}), 500
+
+@app.route('/analyze', methods=['POST', 'OPTIONS'])
+def analyze_compat():
+    if request.method == 'OPTIONS':
+        return '', 200
+    return analyze_code()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 

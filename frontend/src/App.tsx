@@ -3,6 +3,42 @@ import axios from 'axios';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <h2 className="font-bold">Something went wrong</h2>
+          <p>Please refresh the page and try again</p>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Loading Spinner Component
+const LoadingSpinner = () => (
+  <div className="flex justify-center items-center p-4">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+  </div>
+);
+
 // Toast Notification component
 const Toast = ({ message, onClose }: { message: string; onClose: () => void }) => {
   useEffect(() => {
@@ -65,9 +101,15 @@ interface FileItem {
   content: string;
 }
 
+// File validation constants
+const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
+const ALLOWED_FILE_TYPES = [
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.cs',
+  '.html', '.css', '.json', '.yaml', '.yml', '.xml', '.md'
+];
+
 function App() {
   const [code, setCode] = useState('');
-  const [inputLanguage, setInputLanguage] = useState('text');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -76,40 +118,6 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const highlightRef = useRef<HTMLDivElement>(null);
-
-  // Update input language when code changes
-  useEffect(() => {
-    // Simple language detection based on code content for input highlighting
-    if (code.includes('import React') || code.includes('from \'react\'')) {
-      if (code.includes('interface ') || code.includes('type ')) {
-        setInputLanguage('tsx');
-      } else {
-        setInputLanguage('jsx');
-      }
-    } else if (code.includes('function ') || code.includes('const ') || code.includes('let ')) {
-      if (code.includes('interface ') || code.includes('type ')) {
-        setInputLanguage('typescript');
-      } else {
-        setInputLanguage('javascript');
-      }
-    } else if ((code.includes('def ') || code.includes('import ')) && code.includes('if __name__')) {
-      setInputLanguage('python');
-    } else if ((code.includes('public class ') || code.includes('private ')) && code.includes(';')) {
-      setInputLanguage('java');
-    } else if (code.startsWith('<!DOCTYPE html>') || code.includes('<html')) {
-      setInputLanguage('html');
-    } else if (code.includes('{') && code.includes('}') && code.includes(':') && code.includes(';')) {
-      setInputLanguage('css');
-    } else if (code.trim().startsWith('{') && code.trim().endsWith('}')) {
-      try {
-        JSON.parse(code);
-        setInputLanguage('json');
-      } catch (e) {
-        // Not valid JSON
-      }
-    }
-  }, [code]);
 
   const handleClear = () => {
     setCode('');
@@ -123,22 +131,49 @@ function App() {
     fileInputRef.current?.click();
   };
 
+  const validateFile = (file: File): string | null => {
+    if (file.size > MAX_FILE_SIZE) {
+      return 'File size exceeds 1MB limit';
+    }
+    
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!ext || !ALLOWED_FILE_TYPES.includes(`.${ext}`)) {
+      return 'File type not supported';
+    }
+    
+    return null;
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = Array.from(event.target.files || []);
-    const filePromises = newFiles.map(file => {
-      return new Promise<FileItem>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          resolve({
-            name: file.name,
-            content: e.target?.result as string
-          });
-        };
-        reader.readAsText(file);
-      });
-    });
+    
+    // Validate files
+    for (const file of newFiles) {
+      const error = validateFile(file);
+      if (error) {
+        setError(error);
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError('');
 
     try {
+      const filePromises = newFiles.map(file => {
+        return new Promise<FileItem>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            resolve({
+              name: file.name,
+              content: e.target?.result as string
+            });
+          };
+          reader.onerror = () => reject(new Error('Error reading file'));
+          reader.readAsText(file);
+        });
+      });
+
       const newFileItems = await Promise.all(filePromises);
       setFiles(prevFiles => [...prevFiles, ...newFileItems]);
       if (newFileItems.length > 0 && !selectedFile) {
@@ -148,9 +183,10 @@ function App() {
     } catch (err) {
       setError('Error reading files. Please try again.');
       console.error(err);
+    } finally {
+      setLoading(false);
     }
 
-    // Reset the input value so the same files can be selected again
     if (event.target) {
       event.target.value = '';
     }
@@ -180,37 +216,17 @@ function App() {
     }
   };
 
-  const analyzeCode = async () => {
-    if (!code.trim()) {
-      setError('Please enter some code to analyze');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setResult(null);
-
+  const analyzeCode = async (code: string) => {
     try {
-      const response = await axios.post<ApiResponse>('http://localhost:5000/api/analyze', {
-        code: code,
-        filename: selectedFile || ''
-      });
-      
-      if (response.data.error) {
-        setError(response.data.error);
+      const analysisResponse = await axios.post<ApiResponse>('http://localhost:5000/analyze', { code });
+      setResult(analysisResponse.data);
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { error?: string } } };
+        setError(axiosError.response?.data?.error || 'An error occurred while analyzing the code');
       } else {
-        setResult({
-          language: response.data.language,
-          explanation: response.data.explanation,
-          structure: response.data.structure,
-          documented_code: response.data.documented_code
-        });
+        setError('An unexpected error occurred');
       }
-    } catch (err) {
-      setError('Failed to analyze code. Please try again.');
-      console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -259,237 +275,219 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600 mb-4">
-            CodeLens
-          </h1>
-          <p className="text-gray-400 text-lg">
-            Understand your code better with AI-powered analysis
-          </p>
-        </div>
-        
-        <div className="bg-gray-800 rounded-xl shadow-2xl p-6 mb-6 border border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-200">Code Input</h2>
-            <div className="flex space-x-2">
-              <button 
-                onClick={handleClear}
-                className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
-              >
-                Clear All
-              </button>
-              <button 
-                onClick={handleUpload}
-                className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
-              >
-                Upload Files
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept=".txt,.js,.py,.java,.cpp,.cs,.php,.rb,.go,.rs,.swift,.kt,.ts,.jsx,.tsx,.html,.css,.json,.env,.yml,.yaml,.xml,.md,.sql,.sh,.bash,.zsh,.conf,.toml,.ini,.cfg,.config,.lock,.gradle,.maven,.sln,.csproj,.vscode,.idea,.git*,.dockerignore,.eslintrc,.prettierrc,.babelrc,.webpack*,.next*,.env.*"
-                multiple
-                className="hidden"
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gray-950 text-gray-200 p-4">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-12">
+            <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600 mb-4 drop-shadow-lg">
+              CodeLens
+            </h1>
+            <p className="text-gray-400 text-lg">
+              Understand your code better with AI-powered analysis
+            </p>
+          </div>
+          
+          <div className="bg-gray-900 rounded-2xl shadow-2xl p-6 mb-6 border border-gray-800">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-200">Code Input</h2>
+              <div className="flex space-x-2">
+                <button 
+                  onClick={handleClear}
+                  className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 rounded-md transition-colors border border-gray-700"
+                  data-testid="clear-button"
+                >
+                  Clear All
+                </button>
+                <button 
+                  onClick={handleUpload}
+                  className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 rounded-md transition-colors border border-gray-700"
+                  data-testid="upload-button"
+                >
+                  Upload Files
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".txt,.js,.py,.java,.cpp,.cs,.php,.rb,.go,.rs,.swift,.kt,.ts,.jsx,.tsx,.html,.css,.json,.env,.yml,.yaml,.xml,.md,.sql,.sh,.bash,.zsh,.conf,.toml,.ini,.cfg,.config,.lock,.gradle,.maven,.sln,.csproj,.vscode,.idea,.git*,.dockerignore,.eslintrc,.prettierrc,.babelrc,.webpack*,.next*,.env.*"
+                  multiple
+                  className="hidden"
+                  data-testid="file-input"
+                />
+              </div>
+            </div>
+
+            {files.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-gray-400 mb-2">Uploaded Files</h3>
+                <div className="flex flex-wrap gap-2">
+                  {files.map((file) => (
+                    <div
+                      key={file.name}
+                      className={`flex items-center space-x-2 px-3 py-1 rounded-md text-sm ${
+                        selectedFile === file.name
+                          ? 'bg-blue-700 text-white'
+                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      <button
+                        onClick={() => handleFileSelect(file.name)}
+                        className="flex-1 text-left truncate max-w-[200px]"
+                      >
+                        {file.name}
+                      </button>
+                      <button
+                        onClick={() => removeFile(file.name)}
+                        className="text-gray-400 hover:text-white"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="relative border border-gray-800 rounded-lg" style={{ height: '320px' }}>
+              <textarea
+                className="w-full h-full p-4 bg-transparent text-white caret-white resize-none outline-none font-mono text-sm"
+                placeholder="Paste your code here..."
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                style={{ caretColor: 'white', minHeight: '320px', maxHeight: '320px', overflow: 'auto' }}
               />
             </div>
+            
+            <button
+              onClick={() => analyzeCode(code)}
+              disabled={loading}
+              className="mt-4 w-full bg-gradient-to-r from-blue-600 to-purple-700 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-purple-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 transition-all duration-200 shadow-lg"
+              data-testid="analyze-button"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Analyzing...
+                </span>
+              ) : (
+                'Analyze Code'
+              )}
+            </button>
           </div>
 
-          {files.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-sm font-medium text-gray-400 mb-2">Uploaded Files</h3>
-              <div className="flex flex-wrap gap-2">
-                {files.map((file) => (
-                  <div
-                    key={file.name}
-                    className={`flex items-center space-x-2 px-3 py-1 rounded-md text-sm ${
-                      selectedFile === file.name
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    <button
-                      onClick={() => handleFileSelect(file.name)}
-                      className="flex-1 text-left truncate max-w-[200px]"
+          {loading && <LoadingSpinner />}
+          
+          {error && (
+            <div className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded" data-testid="error-message">
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="bg-gray-800 rounded-xl shadow-2xl p-6 border border-gray-700" data-testid="analysis-result">
+              <h2 className="text-2xl font-semibold text-gray-200 mb-6">Analysis Results</h2>
+              <div className="space-y-6">
+                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                  <h3 className="text-lg font-medium text-gray-300 mb-2">Language</h3>
+                  <p className="text-blue-400 font-mono">{result.language}</p>
+                </div>
+
+                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                  <h3 className="text-lg font-medium text-gray-300 mb-2">Code Structure</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Total Lines</p>
+                      <p className="text-xl font-semibold text-blue-400">{result.structure.total_lines}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Functions</p>
+                      <p className="text-xl font-semibold text-green-400">{result.structure.function_definitions}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Classes</p>
+                      <p className="text-xl font-semibold text-purple-400">{result.structure.class_definitions}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Variables</p>
+                      <p className="text-xl font-semibold text-yellow-400">{result.structure.variable_declarations}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Loops</p>
+                      <p className="text-xl font-semibold text-pink-400">{result.structure.loops}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Conditionals</p>
+                      <p className="text-xl font-semibold text-indigo-400">{result.structure.conditionals}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Imports</p>
+                      <p className="text-xl font-semibold text-orange-400">{result.structure.import_statements}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Comments</p>
+                      <p className="text-xl font-semibold text-gray-400">{result.structure.comment_lines}</p>
+                    </div>
+                    <div className="bg-gray-800 p-3 rounded-lg">
+                      <p className="text-sm text-gray-400">Empty Lines</p>
+                      <p className="text-xl font-semibold text-gray-400">{result.structure.empty_lines}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                  <h3 className="text-lg font-medium text-gray-300 mb-2">Explanation</h3>
+                  <p className="text-gray-300 leading-relaxed whitespace-pre-line">{result.explanation}</p>
+                </div>
+
+                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-lg font-medium text-gray-300">Documented Code</h3>
+                    <button 
+                      onClick={() => copyToClipboard(result.documented_code)}
+                      className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
                     >
-                      {file.name}
-                    </button>
-                    <button
-                      onClick={() => removeFile(file.name)}
-                      className="text-gray-400 hover:text-white"
-                    >
-                      ×
+                      Copy Code
                     </button>
                   </div>
-                ))}
+                  <div className="rounded-lg border border-gray-700" style={{ minHeight: '320px', maxHeight: '320px' }}>
+                    <SyntaxHighlighter 
+                      language={getSyntaxHighlightLanguage(result.language)}
+                      style={vscDarkPlus}
+                      showLineNumbers={true}
+                      customStyle={{
+                        margin: 0,
+                        padding: '16px',
+                        borderRadius: 0,
+                        minHeight: '320px',
+                        maxHeight: '320px',
+                        background: 'rgb(15, 23, 42)',
+                        overflow: 'auto'
+                      }}
+                      codeTagProps={{
+                        style: {
+                          fontSize: '0.875rem',
+                          fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
+                        }
+                      }}
+                    >
+                      {result.documented_code}
+                    </SyntaxHighlighter>
+                  </div>
+                </div>
               </div>
             </div>
           )}
-          
-          <div className="relative border border-gray-700 rounded-lg overflow-hidden" style={{ height: '256px' }}>
-            {/* Highlighted code layer */}
-            <div
-              ref={highlightRef}
-              className="absolute inset-0 pointer-events-none overflow-auto"
-            >
-              <SyntaxHighlighter
-                language={inputLanguage}
-                style={vscDarkPlus}
-                showLineNumbers={true}
-                wrapLines={true}
-                wrapLongLines={true}
-                customStyle={{
-                  margin: 0,
-                  padding: '16px',
-                  background: 'transparent',
-                  fontSize: '0.875rem',
-                  fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
-                }}
-              >
-                {code || '\n'}
-              </SyntaxHighlighter>
-            </div>
-
-            {/* Textarea layer */}
-            <textarea
-              className="absolute inset-0 w-full h-full p-4 bg-transparent text-transparent resize-none outline-none font-mono text-sm"
-              placeholder="Paste your code here..."
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onScroll={(e) => {
-                if (highlightRef.current) {
-                  highlightRef.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
-                }
-              }}
-              style={{ caretColor: 'white' }}
-            />
-          </div>
-          
-          <button
-            onClick={analyzeCode}
-            disabled={loading}
-            className="mt-4 w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white py-3 px-4 rounded-lg hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 transition-all duration-200"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Analyzing...
-              </span>
-            ) : (
-              'Analyze Code'
-            )}
-          </button>
         </div>
-
-        {error && (
-          <div className="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg mb-6">
-            {error}
-          </div>
-        )}
-
-        {result && (
-          <div className="bg-gray-800 rounded-xl shadow-2xl p-6 border border-gray-700">
-            <h2 className="text-2xl font-semibold text-gray-200 mb-6">Analysis Results</h2>
-            <div className="space-y-6">
-              <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-medium text-gray-300 mb-2">Language</h3>
-                <p className="text-blue-400 font-mono">{result.language}</p>
-              </div>
-
-              <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-medium text-gray-300 mb-2">Code Structure</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Total Lines</p>
-                    <p className="text-xl font-semibold text-blue-400">{result.structure.total_lines}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Functions</p>
-                    <p className="text-xl font-semibold text-green-400">{result.structure.function_definitions}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Classes</p>
-                    <p className="text-xl font-semibold text-purple-400">{result.structure.class_definitions}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Variables</p>
-                    <p className="text-xl font-semibold text-yellow-400">{result.structure.variable_declarations}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Loops</p>
-                    <p className="text-xl font-semibold text-pink-400">{result.structure.loops}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Conditionals</p>
-                    <p className="text-xl font-semibold text-indigo-400">{result.structure.conditionals}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Imports</p>
-                    <p className="text-xl font-semibold text-orange-400">{result.structure.import_statements}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Comments</p>
-                    <p className="text-xl font-semibold text-gray-400">{result.structure.comment_lines}</p>
-                  </div>
-                  <div className="bg-gray-800 p-3 rounded-lg">
-                    <p className="text-sm text-gray-400">Empty Lines</p>
-                    <p className="text-xl font-semibold text-gray-400">{result.structure.empty_lines}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-medium text-gray-300 mb-2">Explanation</h3>
-                <p className="text-gray-300 leading-relaxed whitespace-pre-line">{result.explanation}</p>
-              </div>
-
-              <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="text-lg font-medium text-gray-300">Documented Code</h3>
-                  <button 
-                    onClick={() => copyToClipboard(result.documented_code)}
-                    className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
-                  >
-                    Copy Code
-                  </button>
-                </div>
-                <div className="rounded-lg overflow-hidden border border-gray-700">
-                  <SyntaxHighlighter 
-                    language={getSyntaxHighlightLanguage(result.language)}
-                    style={vscDarkPlus}
-                    showLineNumbers={true}
-                    customStyle={{
-                      margin: 0,
-                      padding: '16px',
-                      borderRadius: 0,
-                      background: 'rgb(15, 23, 42)' // Tailwind bg-gray-950
-                    }}
-                    codeTagProps={{
-                      style: {
-                        fontSize: '0.875rem',
-                        fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
-                      }
-                    }}
-                  >
-                    {result.documented_code}
-                  </SyntaxHighlighter>
-                </div>
-              </div>
-            </div>
-          </div>
+        
+        {/* Toast notification */}
+        {showToast && (
+          <Toast message={toastMessage} onClose={closeToast} />
         )}
       </div>
-      
-      {/* Toast notification */}
-      {showToast && (
-        <Toast message={toastMessage} onClose={closeToast} />
-      )}
-    </div>
+    </ErrorBoundary>
   );
 }
 

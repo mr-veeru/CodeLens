@@ -1,5 +1,5 @@
 {
-  "name": "codelens",
+  "name": "codelens-frontend",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -7,17 +7,18 @@
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^5.15.10",
     "@mui/material": "^5.15.10",
-    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
     "@types/jest": "^27.5.2",
-    "@types/node": "^16.18.82",
-    "@types/react": "^18.2.56",
-    "@types/react-dom": "^18.2.19",
-    "axios": "^1.6.7",
+    "@types/node": "^16.18.12",
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.11",
+    "axios": "^1.3.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
+    "react-syntax-highlighter": "^15.5.0",
     "typescript": "^4.9.5",
     "web-vitals": "^2.1.4"
   },
@@ -46,7 +47,8 @@
     ]
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.1",
+    "@types/react-syntax-highlighter": "^15.5.6",
+    "tailwindcss": "^3.2.7",
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.35"
   }

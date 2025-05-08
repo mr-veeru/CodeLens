@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import FileExplorer from './components/FileExplorer';
+import LanguageIcon from './components/LanguageIcon';
+import CodeSummaryCard from './components/CodeSummaryCard';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -74,6 +77,9 @@ interface AnalysisResult {
     variable_declarations: number;
     loops: number;
     conditionals: number;
+    ml_frameworks?: string[];
+    ml_operations?: string[];
+    detailed_structure?: any;
   };
   documented_code: string;
 }
@@ -91,6 +97,9 @@ interface ApiResponse {
     variable_declarations: number;
     loops: number;
     conditionals: number;
+    ml_frameworks?: string[];
+    ml_operations?: string[];
+    detailed_structure?: any;
   };
   documented_code: string;
   error?: string;
@@ -275,219 +284,149 @@ function App() {
   };
 
   return (
-    <ErrorBoundary>
-      <div className="min-h-screen bg-gray-950 text-gray-200 p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-12">
-            <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600 mb-4 drop-shadow-lg">
-              CodeLens
-            </h1>
-            <p className="text-gray-400 text-lg">
-              Understand your code better with AI-powered analysis
-            </p>
-          </div>
-          
-          <div className="bg-gray-900 rounded-2xl shadow-2xl p-6 mb-6 border border-gray-800">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-200">Code Input</h2>
-              <div className="flex space-x-2">
-                <button 
-                  onClick={handleClear}
-                  className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 rounded-md transition-colors border border-gray-700"
-                  data-testid="clear-button"
-                >
-                  Clear All
-                </button>
-                <button 
-                  onClick={handleUpload}
-                  className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 rounded-md transition-colors border border-gray-700"
-                  data-testid="upload-button"
-                >
-                  Upload Files
-                </button>
+    <div className="min-h-screen bg-gray-900 text-white">
+      <header className="bg-gray-800 shadow-lg">
+        <div className="container mx-auto px-4 py-4">
+          <h1 className="text-2xl font-bold">CodeLens</h1>
+          <p className="text-gray-400">Analyze and understand code with AI</p>
+        </div>
+      </header>
+
+      <main className="container mx-auto px-4 py-8">
+        <ErrorBoundary>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Sidebar with file explorer */}
+            <div className="lg:col-span-1">
+              <div className="sticky top-4">
+                <FileExplorer 
+                  files={files}
+                  selectedFile={selectedFile}
+                  onFileSelect={handleFileSelect}
+                  onRemoveFile={removeFile}
+                />
+              
+                <div className="mt-4 grid gap-3">
+                  <button
+                    onClick={handleUpload}
+                    className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium flex items-center justify-center"
+                  >
+                    Upload File
+                  </button>
+                  <button 
+                    onClick={handleClear}
+                    className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium"
+                  >
+                    Clear
+                  </button>
+                </div>
+                
                 <input
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept=".txt,.js,.py,.java,.cpp,.cs,.php,.rb,.go,.rs,.swift,.kt,.ts,.jsx,.tsx,.html,.css,.json,.env,.yml,.yaml,.xml,.md,.sql,.sh,.bash,.zsh,.conf,.toml,.ini,.cfg,.config,.lock,.gradle,.maven,.sln,.csproj,.vscode,.idea,.git*,.dockerignore,.eslintrc,.prettierrc,.babelrc,.webpack*,.next*,.env.*"
-                  multiple
                   className="hidden"
-                  data-testid="file-input"
+                  multiple
+                  accept=".js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.cs,.html,.css,.json,.yaml,.yml,.xml,.md"
                 />
               </div>
             </div>
 
-            {files.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-medium text-gray-400 mb-2">Uploaded Files</h3>
-                <div className="flex flex-wrap gap-2">
-                  {files.map((file) => (
-                    <div
-                      key={file.name}
-                      className={`flex items-center space-x-2 px-3 py-1 rounded-md text-sm ${
-                        selectedFile === file.name
-                          ? 'bg-blue-700 text-white'
-                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                      }`}
+            {/* Main content area */}
+            <div className="lg:col-span-3">
+              {/* Code input section */}
+              <div className="bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-700">
+                <div className="flex items-center mb-4">
+                  {selectedFile && (
+                    <div className="flex items-center text-gray-400 text-sm mr-4">
+                      <LanguageIcon 
+                        language={result?.language || "Unknown"} 
+                        size={16} 
+                        className="mr-2" 
+                      />
+                      {selectedFile}
+                    </div>
+                  )}
+                  <div className="ml-auto flex gap-2">
+                    <button
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                      onClick={() => analyzeCode(code)}
+                      disabled={loading || !code.trim()}
                     >
-                      <button
-                        onClick={() => handleFileSelect(file.name)}
-                        className="flex-1 text-left truncate max-w-[200px]"
-                      >
-                        {file.name}
-                      </button>
-                      <button
-                        onClick={() => removeFile(file.name)}
-                        className="text-gray-400 hover:text-white"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="relative border border-gray-800 rounded-lg" style={{ height: '320px' }}>
-              <textarea
-                className="w-full h-full p-4 bg-transparent text-white caret-white resize-none outline-none font-mono text-sm"
-                placeholder="Paste your code here..."
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                style={{ caretColor: 'white', minHeight: '320px', maxHeight: '320px', overflow: 'auto' }}
-              />
-            </div>
-            
-            <button
-              onClick={() => analyzeCode(code)}
-              disabled={loading}
-              className="mt-4 w-full bg-gradient-to-r from-blue-600 to-purple-700 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-purple-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 transition-all duration-200 shadow-lg"
-              data-testid="analyze-button"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Analyzing...
-                </span>
-              ) : (
-                'Analyze Code'
-              )}
-            </button>
-          </div>
-
-          {loading && <LoadingSpinner />}
-          
-          {error && (
-            <div className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded" data-testid="error-message">
-              {error}
-            </div>
-          )}
-
-          {result && (
-            <div className="bg-gray-800 rounded-xl shadow-2xl p-6 border border-gray-700" data-testid="analysis-result">
-              <h2 className="text-2xl font-semibold text-gray-200 mb-6">Analysis Results</h2>
-              <div className="space-y-6">
-                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                  <h3 className="text-lg font-medium text-gray-300 mb-2">Language</h3>
-                  <p className="text-blue-400 font-mono">{result.language}</p>
-                </div>
-
-                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                  <h3 className="text-lg font-medium text-gray-300 mb-2">Code Structure</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Total Lines</p>
-                      <p className="text-xl font-semibold text-blue-400">{result.structure.total_lines}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Functions</p>
-                      <p className="text-xl font-semibold text-green-400">{result.structure.function_definitions}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Classes</p>
-                      <p className="text-xl font-semibold text-purple-400">{result.structure.class_definitions}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Variables</p>
-                      <p className="text-xl font-semibold text-yellow-400">{result.structure.variable_declarations}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Loops</p>
-                      <p className="text-xl font-semibold text-pink-400">{result.structure.loops}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Conditionals</p>
-                      <p className="text-xl font-semibold text-indigo-400">{result.structure.conditionals}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Imports</p>
-                      <p className="text-xl font-semibold text-orange-400">{result.structure.import_statements}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Comments</p>
-                      <p className="text-xl font-semibold text-gray-400">{result.structure.comment_lines}</p>
-                    </div>
-                    <div className="bg-gray-800 p-3 rounded-lg">
-                      <p className="text-sm text-gray-400">Empty Lines</p>
-                      <p className="text-xl font-semibold text-gray-400">{result.structure.empty_lines}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                  <h3 className="text-lg font-medium text-gray-300 mb-2">Explanation</h3>
-                  <p className="text-gray-300 leading-relaxed whitespace-pre-line">{result.explanation}</p>
-                </div>
-
-                <div className="bg-gray-900 p-4 rounded-lg border border-gray-700">
-                  <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-lg font-medium text-gray-300">Documented Code</h3>
-                    <button 
-                      onClick={() => copyToClipboard(result.documented_code)}
-                      className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
-                    >
-                      Copy Code
+                      {loading ? 'Analyzing...' : 'Analyze Code'}
                     </button>
                   </div>
-                  <div className="rounded-lg border border-gray-700" style={{ minHeight: '320px', maxHeight: '320px' }}>
-                    <SyntaxHighlighter 
-                      language={getSyntaxHighlightLanguage(result.language)}
-                      style={vscDarkPlus}
-                      showLineNumbers={true}
-                      customStyle={{
-                        margin: 0,
-                        padding: '16px',
-                        borderRadius: 0,
-                        minHeight: '320px',
-                        maxHeight: '320px',
-                        background: 'rgb(15, 23, 42)',
-                        overflow: 'auto'
-                      }}
-                      codeTagProps={{
-                        style: {
-                          fontSize: '0.875rem',
-                          fontFamily: '"Consolas", "Monaco", "Andale Mono", monospace'
-                        }
-                      }}
-                    >
-                      {result.documented_code}
-                    </SyntaxHighlighter>
-                  </div>
+                </div>
+                
+                <div className="mt-4 relative">
+                  <textarea
+                    className="w-full bg-gray-900 text-white font-mono p-4 rounded-lg border border-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[300px]"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Paste your code here or upload a file..."
+                    rows={15}
+                  />
                 </div>
               </div>
+
+              {error && (
+                <div className="mt-6 p-4 bg-red-900/50 border border-red-700 text-red-200 rounded-lg">
+                  <h3 className="font-bold text-lg mb-2">Error</h3>
+                  <p>{error}</p>
+                </div>
+              )}
+
+              {/* Results section */}
+              {result && (
+                <div className="mt-6 space-y-6">
+                  {/* Code Summary Card */}
+                  <CodeSummaryCard 
+                    language={result.language}
+                    explanation={result.explanation}
+                    isMlCode={!!result.structure.ml_frameworks}
+                    mlFrameworks={result.structure.ml_frameworks}
+                    mlOperations={result.structure.ml_operations}
+                    structure={result.structure}
+                  />
+                  
+                  {/* Documented code section */}
+                  <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 shadow-lg">
+                    <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
+                      <h3 className="font-semibold">
+                        Documented Code
+                      </h3>
+                      <button
+                        onClick={() => copyToClipboard(result.documented_code)}
+                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="overflow-auto">
+                      <SyntaxHighlighter
+                        language={getSyntaxHighlightLanguage(result.language)}
+                        style={vscDarkPlus}
+                        customStyle={{
+                          margin: 0,
+                          padding: '1rem',
+                          background: 'transparent'
+                        }}
+                        showLineNumbers={true}
+                      >
+                        {result.documented_code}
+                      </SyntaxHighlighter>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        
-        {/* Toast notification */}
-        {showToast && (
-          <Toast message={toastMessage} onClose={closeToast} />
-        )}
-      </div>
-    </ErrorBoundary>
+          </div>
+        </ErrorBoundary>
+      </main>
+
+      {showToast && (
+        <Toast message={toastMessage} onClose={closeToast} />
+      )}
+    </div>
   );
 }
 

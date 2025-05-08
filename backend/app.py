@@ -12,6 +12,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 from functools import wraps
 import time
+# Comment out the problematic imports
+# from guesslang import Guess
+import pycparser
+from pycparser import c_ast
+import ast
+# import tempfile
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,6 +51,9 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
+# Comment out the guesslang initialization
+# language_guesser = Guess()
+
 # Error handling decorator
 def handle_errors(f):
     @wraps(f)
@@ -77,7 +86,7 @@ def validate_input(f):
     return decorated_function
 
 def detect_file_type(filename: str, content: str) -> str:
-    """Detect file type based on extension and content."""
+    """Detect file type based on extension and content with enhanced accuracy."""
     # First check the filename
     if filename:
         # Handle files that should be detected by name first
@@ -112,7 +121,8 @@ def detect_file_type(filename: str, content: str) -> str:
         elif ext in ['.md', '.markdown']:
             return 'Markdown'
     
-    # Advanced content-based detection when filename is not available
+    # Remove guesslang detection and rely on content-based detection
+    # Advanced content-based detection as fallback
     # Check for common language patterns
     
     # Java
@@ -147,7 +157,7 @@ def detect_file_type(filename: str, content: str) -> str:
         if any(prop in content for prop in css_properties):
             return 'CSS'
     
-    # Try to detect programming language using Pygments
+    # Try to detect programming language using Pygments as last resort
     try:
         if filename:
             lexer = get_lexer_for_filename(filename)
@@ -160,6 +170,180 @@ def detect_file_type(filename: str, content: str) -> str:
             return 'Environment Variables'
         
         return "Plain Text"
+
+def detect_ml_code(content: str, language: str) -> dict:
+    """Detect if the code contains machine learning frameworks and patterns."""
+    ml_info = {
+        'is_ml_code': False,
+        'frameworks': [],
+        'operations': []
+    }
+    
+    # Common ML framework imports
+    ml_frameworks = {
+        'tensorflow': ['tensorflow', 'tf', 'keras'],
+        'pytorch': ['torch', 'nn.Module'],
+        'scikit-learn': ['sklearn', 'LinearRegression', 'RandomForest'],
+        'xgboost': ['xgboost', 'XGBClassifier'],
+        'pandas': ['pandas', 'pd.DataFrame'],
+        'numpy': ['numpy', 'np.array']
+    }
+    
+    # Common ML operations/patterns
+    ml_operations = {
+        'training': ['fit', 'train', 'optimizer', 'loss', 'train_test_split'],
+        'prediction': ['predict', 'inference', 'evaluate', 'score'],
+        'preprocessing': ['transform', 'preprocessing', 'standardization', 'normalize'],
+        'evaluation': ['accuracy', 'precision', 'recall', 'f1', 'roc_auc', 'confusion_matrix']
+    }
+    
+    # Detect frameworks
+    for framework, keywords in ml_frameworks.items():
+        if any(keyword in content for keyword in keywords):
+            ml_info['frameworks'].append(framework)
+    
+    # Detect operations
+    for operation, keywords in ml_operations.items():
+        if any(keyword in content for keyword in keywords):
+            ml_info['operations'].append(operation)
+    
+    # Determine if it's ML code
+    ml_info['is_ml_code'] = bool(ml_info['frameworks'] or ml_info['operations'])
+    
+    return ml_info
+
+def analyze_python_structure(content: str) -> dict:
+    """Analyze Python code structure using the ast module."""
+    analysis = {
+        'imports': [],
+        'classes': [],
+        'functions': [],
+        'total_functions': 0,
+        'total_classes': 0
+    }
+    
+    try:
+        parsed = ast.parse(content)
+        
+        for node in ast.walk(parsed):
+            # Analyze imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for name in node.names:
+                        analysis['imports'].append(name.name)
+                else:  # ImportFrom
+                    module = node.module or ''
+                    for name in node.names:
+                        analysis['imports'].append(f"{module}.{name.name}")
+            
+            # Analyze classes
+            elif isinstance(node, ast.ClassDef):
+                class_info = {
+                    'name': node.name,
+                    'methods': [m.name for m in node.body if isinstance(m, ast.FunctionDef)],
+                    'line_number': node.lineno
+                }
+                analysis['classes'].append(class_info)
+                analysis['total_classes'] += 1
+            
+            # Analyze functions
+            elif isinstance(node, ast.FunctionDef):
+                # Check if parent is not a class definition
+                is_method = False
+                for parent in ast.walk(parsed):
+                    if isinstance(parent, ast.ClassDef) and node in parent.body:
+                        is_method = True
+                        break
+                
+                if not is_method:
+                    function_info = {
+                        'name': node.name,
+                        'args': len(node.args.args) if hasattr(node.args, 'args') else 0,
+                        'line_number': node.lineno
+                    }
+                    analysis['functions'].append(function_info)
+                    analysis['total_functions'] += 1
+    except SyntaxError:
+        # If there's a syntax error, fall back to simpler analysis
+        pass
+    
+    return analysis
+
+def analyze_c_structure(content: str) -> dict:
+    """Analyze C code structure using simple regex patterns instead of pycparser."""
+    analysis = {
+        'functions': [],
+        'structs': [],
+        'total_functions': 0,
+        'total_structs': 0
+    }
+    
+    try:
+        # Use regex to find function definitions
+        function_pattern = r'\b(\w+)\s+(\w+)\s*\([^)]*\)\s*\{'
+        for match in re.finditer(function_pattern, content):
+            # Skip if return type is if, for, while, etc.
+            if match.group(1) not in ['if', 'for', 'while', 'switch']:
+                analysis['functions'].append({
+                    'name': match.group(2),
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+                analysis['total_functions'] += 1
+        
+        # Use regex to find struct definitions
+        struct_pattern = r'struct\s+(\w+)\s*\{'
+        for match in re.finditer(struct_pattern, content):
+            analysis['structs'].append({
+                'name': match.group(1),
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+            analysis['total_structs'] += 1
+            
+    except Exception as e:
+        # If parsing fails, just log the error and return the basic analysis
+        logger.error(f"Error analyzing C code: {str(e)}")
+    
+    return analysis
+
+def analyze_code_structure(code: str, file_type: str) -> dict:
+    """Analyze code structure and patterns with enhanced features."""
+    if file_type in ['JSON', 'Environment Variables', 'YAML', 'XML', 'TOML', 'Configuration File', 'Markdown', 'Ignore File']:
+        return analyze_config_file(code, file_type)
+    
+    lines = code.split('\n')
+    analysis = {
+        'total_lines': len(lines),
+        'empty_lines': sum(1 for line in lines if not line.strip()),
+        'comment_lines': sum(1 for line in lines if line.strip().startswith(('//', '/*', '*', '#'))),
+        'import_statements': sum(1 for line in lines if re.match(r'^\s*(import|from|require|using)\s+', line.strip())),
+        'function_definitions': sum(1 for line in lines if re.search(r'(function\s+\w+|\w+\s*:\s*function|\w+\s*=\s*\(.*\)\s*=>|def\s+\w+)', line.strip())),
+        'class_definitions': sum(1 for line in lines if re.search(r'(class\s+\w+|interface\s+\w+|type\s+\w+\s*=)', line.strip())),
+        'variable_declarations': sum(1 for line in lines if re.match(r'^\s*(var|let|const|int|float|string|bool|\w+:\s*\w+)\s+\w+', line.strip())),
+        'loops': sum(1 for line in lines if re.search(r'\b(for|while|do)\b', line.strip())),
+        'conditionals': sum(1 for line in lines if re.search(r'\b(if|else|switch|case)\b', line.strip()))
+    }
+    
+    # Add enhanced language-specific analysis
+    if file_type == 'Python':
+        python_analysis = analyze_python_structure(code)
+        analysis.update({
+            'detailed_structure': python_analysis
+        })
+    elif file_type in ['C', 'C++']:
+        c_analysis = analyze_c_structure(code)
+        analysis.update({
+            'detailed_structure': c_analysis
+        })
+    
+    # Detect if code is ML-related
+    ml_info = detect_ml_code(code, file_type)
+    if ml_info['is_ml_code']:
+        analysis.update({
+            'ml_frameworks': ml_info['frameworks'],
+            'ml_operations': ml_info['operations']
+        })
+    
+    return analysis
 
 def analyze_config_file(content: str, file_type: str) -> dict:
     """Analyze configuration and data files."""
@@ -201,25 +385,6 @@ def analyze_config_file(content: str, file_type: str) -> dict:
         analysis['comment_lines'] = sum(1 for line in lines if line.strip().startswith('#'))
         analysis['variable_declarations'] = sum(1 for line in non_empty_lines if not line.startswith('#'))
     
-    return analysis
-
-def analyze_code_structure(code: str, file_type: str) -> dict:
-    """Analyze basic code structure and patterns."""
-    if file_type in ['JSON', 'Environment Variables', 'YAML', 'XML', 'TOML', 'Configuration File', 'Markdown', 'Ignore File']:
-        return analyze_config_file(code, file_type)
-    
-    lines = code.split('\n')
-    analysis = {
-        'total_lines': len(lines),
-        'empty_lines': sum(1 for line in lines if not line.strip()),
-        'comment_lines': sum(1 for line in lines if line.strip().startswith(('//', '/*', '*', '#'))),
-        'import_statements': sum(1 for line in lines if re.match(r'^\s*(import|from|require|using)\s+', line.strip())),
-        'function_definitions': sum(1 for line in lines if re.search(r'(function\s+\w+|\w+\s*:\s*function|\w+\s*=\s*\(.*\)\s*=>|def\s+\w+)', line.strip())),
-        'class_definitions': sum(1 for line in lines if re.search(r'(class\s+\w+|interface\s+\w+|type\s+\w+\s*=)', line.strip())),
-        'variable_declarations': sum(1 for line in lines if re.match(r'^\s*(var|let|const|int|float|string|bool|\w+:\s*\w+)\s+\w+', line.strip())),
-        'loops': sum(1 for line in lines if re.search(r'\b(for|while|do)\b', line.strip())),
-        'conditionals': sum(1 for line in lines if re.search(r'\b(if|else|switch|case)\b', line.strip()))
-    }
     return analysis
 
 def analyze_function_purpose(func_name: str, func_content: str, language: str) -> str:
@@ -338,45 +503,34 @@ def analyze_function_purpose(func_name: str, func_content: str, language: str) -
     return purpose
 
 def generate_code_explanation(code: str, language: str, structure: dict) -> str:
-    """Generate a natural language explanation of the code based on its structure."""
-    if language in ['JSON', 'Environment Variables', 'YAML', 'XML', 'TOML', 'Configuration File', 'Markdown', 'Ignore File']:
-        explanation_parts = [
-            f"This {language} file contains {structure['total_lines']} lines.",
-            f"It defines {structure['variable_declarations']} {'key-value pairs' if language == 'JSON' else 'variables' if language == 'Environment Variables' else 'entries'}."
-        ]
-        
-        if structure['comment_lines'] > 0:
-            explanation_parts.append(f"The file includes {structure['comment_lines']} comment{'s' if structure['comment_lines'] != 1 else ''}.")
-        
-        if structure['empty_lines'] > 0:
-            explanation_parts.append(f"There are {structure['empty_lines']} empty line{'s' if structure['empty_lines'] != 1 else ''} for better readability.")
-            
-        return " ".join(explanation_parts)
+    """Generate a human-readable explanation of code with enhanced ML detection."""
+    explanation = f"This is {language} code with {structure['total_lines']} lines"
     
-    explanation_parts = [
-        f"This {language} code contains {structure['total_lines']} lines of code.",
-        f"It has {structure['function_definitions']} function{'s' if structure['function_definitions'] != 1 else ''}",
-        f"and {structure['class_definitions']} class{'es' if structure['class_definitions'] != 1 else ''}."
-    ]
+    # Add ML-specific explanation if detected
+    if 'ml_frameworks' in structure:
+        frameworks = ', '.join(structure['ml_frameworks'])
+        operations = ', '.join(structure['ml_operations'])
+        
+        explanation += f". It appears to be a machine learning project using {frameworks}" if frameworks else ". It appears to contain machine learning code"
+        explanation += f", performing operations such as {operations}" if operations else ""
     
-    if structure['import_statements'] > 0:
-        explanation_parts.append(f"The code imports {structure['import_statements']} external module{'s' if structure['import_statements'] != 1 else ''}.")
+    explanation += f". It contains {structure['function_definitions']} functions, {structure['class_definitions']} classes, and uses {structure['import_statements']} imports. "
     
     if structure['loops'] > 0 or structure['conditionals'] > 0:
-        control_flow = []
-        if structure['loops'] > 0:
-            control_flow.append(f"{structure['loops']} loop{'s' if structure['loops'] != 1 else ''}")
-        if structure['conditionals'] > 0:
-            control_flow.append(f"{structure['conditionals']} conditional statement{'s' if structure['conditionals'] != 1 else ''}")
-        explanation_parts.append(f"It uses {' and '.join(control_flow)} for control flow.")
+        explanation += f"The code includes {structure['loops']} loops and {structure['conditionals']} conditional statements. "
     
-    if structure['variable_declarations'] > 0:
-        explanation_parts.append(f"There are {structure['variable_declarations']} variable declaration{'s' if structure['variable_declarations'] != 1 else ''}.")
+    # Add detailed structure explanation if available
+    if 'detailed_structure' in structure:
+        detailed = structure['detailed_structure']
+        if 'classes' in detailed and detailed['classes']:
+            class_names = ', '.join([c['name'] for c in detailed['classes'][:3]])
+            explanation += f"Main classes include: {class_names}" + ("..." if len(detailed['classes']) > 3 else "") + ". "
+            
+        if 'functions' in detailed and detailed['functions']:
+            func_names = ', '.join([f['name'] for f in detailed['functions'][:3]])
+            explanation += f"Key functions include: {func_names}" + ("..." if len(detailed['functions']) > 3 else "") + "."
     
-    if structure['comment_lines'] > 0:
-        explanation_parts.append(f"The code includes {structure['comment_lines']} comment line{'s' if structure['comment_lines'] != 1 else ''} for documentation.")
-    
-    return " ".join(explanation_parts)
+    return explanation
 
 def generate_documented_code(code: str, language: str, structure: dict) -> str:
     """Generate documented version of the code."""

@@ -1,3 +1,8 @@
+/**
+ * CodeLens Frontend Application
+ * A React-based web application for code analysis and documentation.
+ */
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -13,7 +18,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CodeIcon from '@mui/icons-material/Code';
 import { useCode } from './contexts/CodeContext';
 
-// Dark theme configuration
+/**
+ * Dark theme configuration for Material-UI
+ */
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
@@ -44,7 +51,10 @@ const darkTheme = createTheme({
   },
 });
 
-// Error Boundary Component
+/**
+ * Error Boundary Component
+ * Catches JavaScript errors in child components and displays a fallback UI
+ */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -73,12 +83,18 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-// Loading Spinner Component
+/**
+ * Loading Spinner Component
+ * Displays a circular progress indicator
+ */
 const LoadingSpinner = () => (
   <CircularProgress size={24} color="inherit" />
 );
 
-// Toast Notification component
+/**
+ * Toast Notification Component
+ * Displays temporary notifications to the user
+ */
 const Toast = ({ message, onClose }: { message: string; onClose: () => void }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -100,7 +116,10 @@ const Toast = ({ message, onClose }: { message: string; onClose: () => void }) =
   );
 };
 
-// CodeEditor component
+/**
+ * Code Editor Component
+ * Provides a text area for code input with language detection and analysis capabilities
+ */
 const CodeEditor = ({ 
   code, 
   onChange, 
@@ -155,7 +174,10 @@ const CodeEditor = ({
   );
 };
 
-// DocumentedCodeViewer component
+/**
+ * Documented Code Viewer Component
+ * Displays code with syntax highlighting and documentation
+ */
 const DocumentedCodeViewer = ({
   documentedCode,
   language,
@@ -197,6 +219,10 @@ const DocumentedCodeViewer = ({
   );
 };
 
+/**
+ * Main Application Component
+ * Orchestrates the code analysis workflow
+ */
 function App() {
   const {
     code,

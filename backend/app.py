@@ -1,3 +1,8 @@
+"""
+CodeLens Backend API
+A Flask-based REST API for code analysis and documentation generation.
+"""
+
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from pygments.lexers import get_lexer_for_filename, guess_lexer
@@ -157,17 +162,23 @@ def validate_input(f):
     return decorated_function
 
 def detect_file_type(filename: str, content: str) -> str:
-    """Detect file type based on extension and content with enhanced accuracy."""
-    # First check the filename
+    """
+    Detect the programming language of a file based on its extension and content.
+    
+    Args:
+        filename (str): Name of the file
+        content (str): Content of the file
+        
+    Returns:
+        str: Detected programming language
+    """
     if filename:
-        # Handle files that should be detected by name first
         name_lower = filename.lower()
         if name_lower == '.env' or name_lower.startswith('.env.'):
             return 'Environment Variables'
         if name_lower in ['.gitignore', '.dockerignore']:
             return 'Ignore File'
             
-        # Then check extensions
         ext = Path(filename).suffix.lower()
         if ext == '.tsx':
             return 'TypeScript React'
@@ -192,55 +203,23 @@ def detect_file_type(filename: str, content: str) -> str:
         elif ext in ['.md', '.markdown']:
             return 'Markdown'
     
-    # Remove guesslang detection and rely on content-based detection
-    # Advanced content-based detection as fallback
-    # Check for common language patterns
-    
-    # Java
+    # Content-based language detection
     if 'public class ' in content and ('.java' in filename.lower() if filename else True):
         return 'Java'
-        
-    # C#
-    if 'namespace ' in content and 'using System' in content:
-        return 'C#'
-        
-    # Python
-    if ('import ' in content and 'def ' in content) or 'if __name__ == "__main__"' in content:
+    elif 'def ' in content and ('.py' in filename.lower() if filename else True):
         return 'Python'
-        
-    # JavaScript/TypeScript
-    if 'function ' in content or 'const ' in content or 'let ' in content:
-        if 'interface ' in content or 'type ' in content:
-            if 'import React' in content or 'from \'react\'' in content:
-                return 'TypeScript React'
-            return 'TypeScript'
-        if 'import React' in content or 'from \'react\'' in content:
-            return 'JavaScript React'
+    elif 'function ' in content and ('.js' in filename.lower() if filename else True):
         return 'JavaScript'
-        
-    # HTML
-    if '<!DOCTYPE html>' in content or '<html' in content:
-        return 'HTML'
-        
-    # CSS
-    if '{' in content and '}' in content and (':' in content) and (';' in content):
-        css_properties = ['margin', 'padding', 'color', 'background', 'font-size', 'display']
-        if any(prop in content for prop in css_properties):
-            return 'CSS'
+    elif '#include' in content and ('.c' in filename.lower() or '.h' in filename.lower() if filename else True):
+        return 'C'
+    elif '<?php' in content:
+        return 'PHP'
+    elif 'package ' in content and ('.go' in filename.lower() if filename else True):
+        return 'Go'
+    elif 'fn ' in content and ('.rs' in filename.lower() if filename else True):
+        return 'Rust'
     
-    # Try to detect programming language using Pygments as last resort
-    try:
-        if filename:
-            lexer = get_lexer_for_filename(filename)
-        else:
-            lexer = guess_lexer(content)
-        return lexer.name
-    except ClassNotFound:
-        # If we can't detect the language, try to determine if it's a config file
-        if '=' in content and not any(keyword in content.lower() for keyword in ['if', 'for', 'while', 'def', 'class']):
-            return 'Environment Variables'
-        
-        return "Plain Text"
+    return 'Unknown'
 
 def detect_ml_code(content: str, language: str) -> dict:
     """Detect if the code contains machine learning frameworks and patterns."""
@@ -850,47 +829,31 @@ def generate_documented_code(code: str, language: str, structure: dict) -> str:
 
 @app.route('/api/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
-@cache_response(expire=60*10)  # Cache for 10 minutes
+@cache_response(expire=60*10)
 @handle_errors
 @validate_input
 def analyze_code():
-    """Analyze code and return structure, language and documentation."""
-    start_time = time.time()
+    """
+    Analyze code and generate documentation.
+    
+    Returns:
+        JSON response containing analysis results
+    """
     data = request.get_json()
     code = data['code']
     filename = data.get('filename', '')
     
-    # Detect the file type
     file_type = detect_file_type(filename, code)
-    
-    # Analyze code structure
     structure = analyze_code_structure(code, file_type)
-    
-    # Generate explanation
     explanation = generate_code_explanation(code, file_type, structure)
-    
-    # Generate documented code
     documented_code = generate_documented_code(code, file_type, structure)
     
-    # Include performance metrics in response
-    processing_time = time.time() - start_time
-    
-    # Return the results
-    result = {
+    return jsonify({
         'language': file_type,
-        'explanation': explanation,
         'structure': structure,
-        'documented_code': documented_code,
-        'meta': {
-            'processing_time_ms': round(processing_time * 1000, 2),
-            'timestamp': datetime.datetime.now().isoformat(),
-            'api_version': '1.0.0'
-        }
-    }
-    
-    logger.info(f"Analyzed {len(code)} bytes of {file_type} code in {processing_time:.2f}s")
-    
-    return jsonify(result)
+        'explanation': explanation,
+        'documented_code': documented_code
+    })
 
 @app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze_compat():
@@ -906,11 +869,15 @@ def analyze_compat():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint for monitoring."""
+    """
+    Health check endpoint.
+    
+    Returns:
+        JSON response indicating API status
+    """
     return jsonify({
-        'status': 'ok',
-        'timestamp': datetime.datetime.now().isoformat(),
-        'version': '1.0.0'
+        'status': 'healthy',
+        'timestamp': datetime.datetime.utcnow().isoformat()
     })
 
 if __name__ == '__main__':

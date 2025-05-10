@@ -1,10 +1,48 @@
-import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import FileExplorer from './components/FileExplorer';
 import LanguageIcon from './components/LanguageIcon';
 import CodeSummaryCard from './components/CodeSummaryCard';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import CircularProgress from '@mui/material/CircularProgress';
+import Button from '@mui/material/Button';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CodeIcon from '@mui/icons-material/Code';
+import { useCode } from './contexts/CodeContext';
+
+// Dark theme configuration
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#3b82f6', // Tailwind blue-500
+    },
+    secondary: {
+      main: '#64748b', // Tailwind slate-500
+    },
+    background: {
+      default: '#111827', // Tailwind gray-900
+      paper: '#1f2937', // Tailwind gray-800
+    },
+  },
+  typography: {
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 8,
+          textTransform: 'none',
+          fontWeight: 500,
+        },
+      },
+    },
+  },
+});
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -37,9 +75,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 
 // Loading Spinner Component
 const LoadingSpinner = () => (
-  <div className="flex justify-center items-center p-4">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-  </div>
+  <CircularProgress size={24} color="inherit" />
 );
 
 // Toast Notification component
@@ -64,185 +100,139 @@ const Toast = ({ message, onClose }: { message: string; onClose: () => void }) =
   );
 };
 
-interface AnalysisResult {
+// CodeEditor component
+const CodeEditor = ({ 
+  code, 
+  onChange, 
+  selectedFile,
+  language,
+  onAnalyze,
+  loading
+}: { 
+  code: string; 
+  onChange: (code: string) => void;
+  selectedFile: string | null;
   language: string;
-  explanation: string;
-  structure: {
-    total_lines: number;
-    empty_lines: number;
-    comment_lines: number;
-    import_statements: number;
-    function_definitions: number;
-    class_definitions: number;
-    variable_declarations: number;
-    loops: number;
-    conditionals: number;
-    ml_frameworks?: string[];
-    ml_operations?: string[];
-    detailed_structure?: any;
-  };
-  documented_code: string;
-}
+  onAnalyze: () => void;
+  loading: boolean;
+}) => {
+  return (
+    <div className="bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-700">
+      <div className="flex items-center mb-4">
+        {selectedFile && (
+          <div className="flex items-center text-gray-400 text-sm mr-4">
+            <LanguageIcon 
+              language={language} 
+              size={16} 
+              className="mr-2" 
+            />
+            {selectedFile}
+          </div>
+        )}
+        <div className="ml-auto">
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={onAnalyze}
+            disabled={loading || !code.trim()}
+            startIcon={loading ? <LoadingSpinner /> : <CodeIcon />}
+          >
+            {loading ? 'Analyzing...' : 'Analyze Code'}
+          </Button>
+        </div>
+      </div>
+      
+      <div className="mt-4 relative">
+        <textarea
+          className="w-full bg-gray-900 text-white font-mono p-4 rounded-lg border border-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[300px]"
+          value={code}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Paste your code here or upload a file..."
+          rows={15}
+        />
+      </div>
+    </div>
+  );
+};
 
-interface ApiResponse {
+// DocumentedCodeViewer component
+const DocumentedCodeViewer = ({
+  documentedCode,
+  language,
+  onCopy
+}: {
+  documentedCode: string;
   language: string;
-  explanation: string;
-  structure: {
-    total_lines: number;
-    empty_lines: number;
-    comment_lines: number;
-    import_statements: number;
-    function_definitions: number;
-    class_definitions: number;
-    variable_declarations: number;
-    loops: number;
-    conditionals: number;
-    ml_frameworks?: string[];
-    ml_operations?: string[];
-    detailed_structure?: any;
-  };
-  documented_code: string;
-  error?: string;
-}
-
-interface FileItem {
-  name: string;
-  content: string;
-}
-
-// File validation constants
-const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB
-const ALLOWED_FILE_TYPES = [
-  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.cs',
-  '.html', '.css', '.json', '.yaml', '.yml', '.xml', '.md'
-];
+  onCopy: () => void;
+}) => {
+  return (
+    <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 shadow-lg">
+      <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
+        <h3 className="font-semibold">
+          Documented Code
+        </h3>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={onCopy}
+        >
+          Copy
+        </Button>
+      </div>
+      <div className="overflow-auto h-[500px]">
+        <SyntaxHighlighter
+          language={language}
+          style={vscDarkPlus}
+          customStyle={{
+            margin: 0,
+            padding: '1rem',
+            background: 'transparent'
+          }}
+          showLineNumbers={true}
+        >
+          {documentedCode}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+};
 
 function App() {
-  const [code, setCode] = useState('');
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const {
+    code,
+    setCode,
+    files,
+    selectedFile,
+    result,
+    loading,
+    error,
+    analyzeCode: contextAnalyzeCode,
+    handleFileSelect,
+    handleFileUpload,
+    removeFile,
+    clearAll
+  } = useCode();
+
+  const [toastMessage, setToastMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
 
-  const handleClear = () => {
-    setCode('');
-    setResult(null);
-    setError('');
-    setFiles([]);
-    setSelectedFile(null);
-  };
-
-  const handleUpload = () => {
+  const handleUpload = useCallback(() => {
     fileInputRef.current?.click();
-  };
+  }, []);
 
-  const validateFile = (file: File): string | null => {
-    if (file.size > MAX_FILE_SIZE) {
-      return 'File size exceeds 1MB limit';
-    }
-    
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    if (!ext || !ALLOWED_FILE_TYPES.includes(`.${ext}`)) {
-      return 'File type not supported';
-    }
-    
-    return null;
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = Array.from(event.target.files || []);
+    await handleFileUpload(newFiles);
     
-    // Validate files
-    for (const file of newFiles) {
-      const error = validateFile(file);
-      if (error) {
-        setError(error);
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const filePromises = newFiles.map(file => {
-        return new Promise<FileItem>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            resolve({
-              name: file.name,
-              content: e.target?.result as string
-            });
-          };
-          reader.onerror = () => reject(new Error('Error reading file'));
-          reader.readAsText(file);
-        });
-      });
-
-      const newFileItems = await Promise.all(filePromises);
-      setFiles(prevFiles => [...prevFiles, ...newFileItems]);
-      if (newFileItems.length > 0 && !selectedFile) {
-        setSelectedFile(newFileItems[0].name);
-        setCode(newFileItems[0].content);
-      }
-    } catch (err) {
-      setError('Error reading files. Please try again.');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-
     if (event.target) {
       event.target.value = '';
     }
-  };
+  }, [handleFileUpload]);
 
-  const handleFileSelect = (fileName: string) => {
-    const file = files.find(f => f.name === fileName);
-    if (file) {
-      setSelectedFile(fileName);
-      setCode(file.content);
-    }
-  };
-
-  const removeFile = (fileName: string) => {
-    setFiles(prevFiles => prevFiles.filter(f => f.name !== fileName));
-    if (selectedFile === fileName) {
-      if (files.length > 1) {
-        const nextFile = files.find(f => f.name !== fileName);
-        if (nextFile) {
-          setSelectedFile(nextFile.name);
-          setCode(nextFile.content);
-        }
-      } else {
-        setSelectedFile(null);
-        setCode('');
-      }
-    }
-  };
-
-  const analyzeCode = async (code: string) => {
-    try {
-      const analysisResponse = await axios.post<ApiResponse>('http://localhost:5000/analyze', { code });
-      setResult(analysisResponse.data);
-    } catch (error: unknown) {
-      if (error && typeof error === 'object' && 'response' in error) {
-        const axiosError = error as { response?: { data?: { error?: string } } };
-        setError(axiosError.response?.data?.error || 'An error occurred while analyzing the code');
-      } else {
-        setError('An unexpected error occurred');
-      }
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(
       () => {
-        // Show toast instead of alert
         setToastMessage('Code copied to clipboard!');
         setShowToast(true);
       },
@@ -252,14 +242,14 @@ function App() {
         setShowToast(true);
       }
     );
-  };
+  }, []);
 
-  const closeToast = () => {
+  const closeToast = useCallback(() => {
     setShowToast(false);
-  };
+  }, []);
 
   // Function to determine the language for syntax highlighting
-  const getSyntaxHighlightLanguage = (language: string): string => {
+  const getSyntaxHighlightLanguage = useCallback((language: string): string => {
     // Map our language detection to syntax highlighter's language names
     const languageMap: { [key: string]: string } = {
       'JavaScript': 'javascript',
@@ -281,152 +271,115 @@ function App() {
     };
     
     return languageMap[language] || 'text';
-  };
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="bg-gray-800 shadow-lg">
-        <div className="container mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold">CodeLens</h1>
-          <p className="text-gray-400">Analyze and understand code with AI</p>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <ErrorBoundary>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Sidebar with file explorer */}
-            <div className="lg:col-span-1">
-              <div className="sticky top-4">
-                <FileExplorer 
-                  files={files}
-                  selectedFile={selectedFile}
-                  onFileSelect={handleFileSelect}
-                  onRemoveFile={removeFile}
-                />
-              
-                <div className="mt-4 grid gap-3">
-                  <button
-                    onClick={handleUpload}
-                    className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium flex items-center justify-center"
-                  >
-                    Upload File
-                  </button>
-                  <button 
-                    onClick={handleClear}
-                    className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium"
-                  >
-                    Clear
-                  </button>
-                </div>
-                
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  className="hidden"
-                  multiple
-                  accept=".js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.cs,.html,.css,.json,.yaml,.yml,.xml,.md"
-                />
-              </div>
-            </div>
-
-            {/* Main content area */}
-            <div className="lg:col-span-3">
-              {/* Code input section */}
-              <div className="bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-700">
-                <div className="flex items-center mb-4">
-                  {selectedFile && (
-                    <div className="flex items-center text-gray-400 text-sm mr-4">
-                      <LanguageIcon 
-                        language={result?.language || "Unknown"} 
-                        size={16} 
-                        className="mr-2" 
-                      />
-                      {selectedFile}
-                    </div>
-                  )}
-                  <div className="ml-auto flex gap-2">
-                    <button
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
-                      onClick={() => analyzeCode(code)}
-                      disabled={loading || !code.trim()}
-                    >
-                      {loading ? 'Analyzing...' : 'Analyze Code'}
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="mt-4 relative">
-                  <textarea
-                    className="w-full bg-gray-900 text-white font-mono p-4 rounded-lg border border-gray-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[300px]"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="Paste your code here or upload a file..."
-                    rows={15}
-                  />
-                </div>
-              </div>
-
-              {error && (
-                <div className="mt-6 p-4 bg-red-900/50 border border-red-700 text-red-200 rounded-lg">
-                  <h3 className="font-bold text-lg mb-2">Error</h3>
-                  <p>{error}</p>
-                </div>
-              )}
-
-              {/* Results section */}
-              {result && (
-                <div className="mt-6 space-y-6">
-                  {/* Code Summary Card */}
-                  <CodeSummaryCard 
-                    language={result.language}
-                    explanation={result.explanation}
-                    isMlCode={!!result.structure.ml_frameworks}
-                    mlFrameworks={result.structure.ml_frameworks}
-                    mlOperations={result.structure.ml_operations}
-                    structure={result.structure}
-                  />
-                  
-                  {/* Documented code section */}
-                  <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 shadow-lg">
-                    <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
-                      <h3 className="font-semibold">
-                        Documented Code
-                      </h3>
-                      <button
-                        onClick={() => copyToClipboard(result.documented_code)}
-                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                    <div className="overflow-auto">
-                      <SyntaxHighlighter
-                        language={getSyntaxHighlightLanguage(result.language)}
-                        style={vscDarkPlus}
-                        customStyle={{
-                          margin: 0,
-                          padding: '1rem',
-                          background: 'transparent'
-                        }}
-                        showLineNumbers={true}
-                      >
-                        {result.documented_code}
-                      </SyntaxHighlighter>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+    <ThemeProvider theme={darkTheme}>
+      <CssBaseline />
+      <div className="min-h-screen bg-gray-900 text-white">
+        <header className="bg-gray-800 shadow-lg">
+          <div className="container mx-auto px-4 py-4">
+            <h1 className="text-2xl font-bold flex items-center">
+              <CodeIcon className="mr-2" /> CodeLens
+            </h1>
+            <p className="text-gray-400">AI-powered code analysis and documentation</p>
           </div>
-        </ErrorBoundary>
-      </main>
+        </header>
 
-      {showToast && (
-        <Toast message={toastMessage} onClose={closeToast} />
-      )}
-    </div>
+        <main className="container mx-auto px-4 py-8">
+          <ErrorBoundary>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Sidebar with file explorer */}
+              <div className="lg:col-span-1">
+                <div className="sticky top-4">
+                  <FileExplorer 
+                    files={files}
+                    selectedFile={selectedFile}
+                    onFileSelect={handleFileSelect}
+                    onRemoveFile={removeFile}
+                  />
+                
+                  <div className="mt-4 grid gap-3">
+                    <Button
+                      variant="contained"
+                      fullWidth
+                      onClick={handleUpload}
+                      startIcon={<UploadFileIcon />}
+                    >
+                      Upload File
+                    </Button>
+                    <Button 
+                      variant="outlined"
+                      color="secondary"
+                      fullWidth
+                      onClick={clearAll}
+                      startIcon={<DeleteIcon />}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                  
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                    multiple
+                    accept=".js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.cs,.html,.css,.json,.yaml,.yml,.xml,.md"
+                  />
+                </div>
+              </div>
+
+              {/* Main content area */}
+              <div className="lg:col-span-3">
+                {/* Code input section */}
+                <CodeEditor
+                  code={code}
+                  onChange={setCode}
+                  selectedFile={selectedFile}
+                  language={result?.language || "Unknown"}
+                  onAnalyze={contextAnalyzeCode}
+                  loading={loading}
+                />
+
+                {error && (
+                  <div className="mt-6 p-4 bg-red-900/50 border border-red-700 text-red-200 rounded-lg">
+                    <h3 className="font-bold text-lg mb-2">Error</h3>
+                    <p>{error}</p>
+                  </div>
+                )}
+
+                {/* Results section */}
+                {result && (
+                  <div className="mt-6 space-y-6">
+                    {/* Code Summary Card */}
+                    <CodeSummaryCard 
+                      language={result.language}
+                      explanation={result.explanation}
+                      isMlCode={!!result.structure.ml_frameworks}
+                      mlFrameworks={result.structure.ml_frameworks}
+                      mlOperations={result.structure.ml_operations}
+                      structure={result.structure}
+                    />
+                    
+                    {/* Documented code section */}
+                    <DocumentedCodeViewer
+                      documentedCode={result.documented_code}
+                      language={getSyntaxHighlightLanguage(result.language)}
+                      onCopy={() => copyToClipboard(result.documented_code)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </ErrorBoundary>
+        </main>
+
+        {showToast && (
+          <Toast message={toastMessage} onClose={closeToast} />
+        )}
+      </div>
+    </ThemeProvider>
   );
 }
 

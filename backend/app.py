@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from pygments.lexers import get_lexer_for_filename, guess_lexer
 from pygments.util import ClassNotFound
@@ -12,12 +12,15 @@ import logging
 from logging.handlers import RotatingFileHandler
 from functools import wraps
 import time
-# Comment out the problematic imports
-# from guesslang import Guess
+import hashlib
+import datetime
+from werkzeug.middleware.proxy_fix import ProxyFix
+import secrets
 import pycparser
 from pycparser import c_ast
 import ast
-# import tempfile
+# Comment out the problematic imports
+# from guesslang import Guess
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,18 +32,26 @@ handler.setFormatter(logging.Formatter(
 logger.addHandler(handler)
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# Generate a random API key for the app
+if not os.environ.get('FLASK_SECRET_KEY'):
+    os.environ['FLASK_SECRET_KEY'] = secrets.token_hex(32)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY')
 
 # Configure CORS with specific origins
+# In production, replace with actual domain
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "origins": ALLOWED_ORIGINS,
         "methods": ["GET", "POST"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type", "Authorization"]
     },
     r"/analyze": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "origins": ALLOWED_ORIGINS,
         "methods": ["POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -48,11 +59,59 @@ CORS(app, resources={
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.environ.get("REDIS_URL", "memory://")
 )
 
-# Comment out the guesslang initialization
-# language_guesser = Guess()
+# Simple in-memory cache for demonstration
+# In production, use Redis or another distributed cache
+cache = {}
+CACHE_EXPIRY = 60 * 60  # 1 hour in seconds
+
+# Security headers middleware
+@app.after_request
+def add_security_headers(response):
+    response.headers['Content-Security-Policy'] = "default-src 'self'"
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+# Cache decorator
+def cache_response(expire=CACHE_EXPIRY):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Skip caching for non-GET requests
+            if request.method != 'POST':
+                return f(*args, **kwargs)
+                
+            # Generate cache key based on request data
+            cache_key = hashlib.md5(request.data).hexdigest()
+            
+            # Check if result exists in cache
+            if cache_key in cache:
+                cached_result, timestamp = cache[cache_key]
+                # Check if cache has expired
+                if time.time() - timestamp < expire:
+                    logger.info(f"Cache hit for {cache_key}")
+                    return cached_result
+            
+            # If not in cache or expired, execute the function
+            result = f(*args, **kwargs)
+            
+            # Cache the result
+            cache[cache_key] = (result, time.time())
+            
+            # Clean up old cache entries (simple strategy)
+            if len(cache) > 100:  # Limit cache size
+                oldest_key = min(cache.items(), key=lambda x: x[1][1])[0]
+                cache.pop(oldest_key)
+                
+            return result
+        return decorated_function
+    return decorator
 
 # Error handling decorator
 def handle_errors(f):
@@ -62,7 +121,19 @@ def handle_errors(f):
             return f(*args, **kwargs)
         except Exception as e:
             logger.error(f"Error in {f.__name__}: {str(e)}")
-            return jsonify({"error": "An internal server error occurred"}), 500
+            error_id = hashlib.md5(f"{time.time()}{str(e)}".encode()).hexdigest()[:8]
+            logger.error(f"Error ID: {error_id}")
+            
+            # Include error ID in response for easier troubleshooting
+            response = {
+                "error": "An internal server error occurred",
+                "error_id": error_id
+            }
+            
+            if app.debug:
+                response["debug_info"] = str(e)
+                
+            return jsonify(response), 500
     return decorated_function
 
 # Input validation decorator
@@ -779,46 +850,70 @@ def generate_documented_code(code: str, language: str, structure: dict) -> str:
 
 @app.route('/api/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
+@cache_response(expire=60*10)  # Cache for 10 minutes
 @handle_errors
 @validate_input
 def analyze_code():
+    """Analyze code and return structure, language and documentation."""
     start_time = time.time()
     data = request.get_json()
     code = data['code']
     filename = data.get('filename', '')
     
-    try:
-        # Detect file type
-        file_type = detect_file_type(filename, code)
-        
-        # Analyze code structure
-        structure = analyze_code_structure(code, file_type)
-        
-        # Generate explanation
-        explanation = generate_code_explanation(code, file_type, structure)
-        
-        # Generate documented code
-        documented_code = generate_documented_code(code, file_type, structure)
-        
-        response_time = time.time() - start_time
-        logger.info(f"Analysis completed in {response_time:.2f} seconds for file: {filename}")
-        
-        return jsonify({
-            "language": file_type,
-            "explanation": explanation,
-            "structure": structure,
-            "documented_code": documented_code
-        })
-        
-    except Exception as e:
-        logger.error(f"Error analyzing code: {str(e)}")
-        return jsonify({"error": "Failed to analyze code"}), 500
+    # Detect the file type
+    file_type = detect_file_type(filename, code)
+    
+    # Analyze code structure
+    structure = analyze_code_structure(code, file_type)
+    
+    # Generate explanation
+    explanation = generate_code_explanation(code, file_type, structure)
+    
+    # Generate documented code
+    documented_code = generate_documented_code(code, file_type, structure)
+    
+    # Include performance metrics in response
+    processing_time = time.time() - start_time
+    
+    # Return the results
+    result = {
+        'language': file_type,
+        'explanation': explanation,
+        'structure': structure,
+        'documented_code': documented_code,
+        'meta': {
+            'processing_time_ms': round(processing_time * 1000, 2),
+            'timestamp': datetime.datetime.now().isoformat(),
+            'api_version': '1.0.0'
+        }
+    }
+    
+    logger.info(f"Analyzed {len(code)} bytes of {file_type} code in {processing_time:.2f}s")
+    
+    return jsonify(result)
 
 @app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze_compat():
+    """Legacy endpoint for compatibility."""
     if request.method == 'OPTIONS':
-        return '', 200
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'POST,OPTIONS')
+        return response
+        
     return analyze_code()
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring."""
+    return jsonify({
+        'status': 'ok',
+        'timestamp': datetime.datetime.now().isoformat(),
+        'version': '1.0.0'
+    })
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000) 
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=port, debug=debug) 

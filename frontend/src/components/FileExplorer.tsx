@@ -1,6 +1,46 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import LanguageIcon from './LanguageIcon';
-import { FiFolder, FiTrash2, FiChevronRight, FiChevronDown } from 'react-icons/fi';
+import { 
+  ChevronRight, 
+  ExpandMore, 
+  FolderOutlined, 
+  DeleteOutline,
+  InsertDriveFileOutlined
+} from '@mui/icons-material';
+import { 
+  Box, 
+  Typography, 
+  IconButton, 
+  List, 
+  ListItem, 
+  ListItemButton, 
+  ListItemIcon, 
+  ListItemText, 
+  Paper, 
+  Collapse, 
+  Tooltip,
+  alpha
+} from '@mui/material';
+import { styled } from '@mui/material/styles';
+
+// Styled components
+const StyledPaper = styled(Paper)(({ theme }) => ({
+  height: '100%',
+  width: '100%',
+  borderRadius: theme.shape.borderRadius,
+  overflow: 'hidden',
+  border: `1px solid ${theme.palette.divider}`,
+}));
+
+const Header = styled(Box)(({ theme }) => ({
+  padding: theme.spacing(1, 1.5),
+  backgroundColor: theme.palette.grey[900],
+  borderBottom: `1px solid ${theme.palette.divider}`,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  cursor: 'pointer',
+}));
 
 interface FileItem {
   name: string;
@@ -14,13 +54,23 @@ interface FileExplorerProps {
   onRemoveFile: (fileName: string) => void;
 }
 
+// Virtual file system for organizing files by folders
+interface FileSystemNode {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+  content?: string;
+  children: Record<string, FileSystemNode>;
+}
+
 const FileExplorer: React.FC<FileExplorerProps> = ({ 
   files, 
   selectedFile, 
   onFileSelect,
   onRemoveFile
 }) => {
-  const [expanded, setExpanded] = React.useState(true);
+  const [expanded, setExpanded] = useState(true);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   
   // Determine language from file extension
   const getLanguageFromFilename = (filename: string): string => {
@@ -57,87 +107,212 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     return extensionMap[ext] || 'Plain Text';
   };
   
-  // Group files by their "folders" (if filenames contain /)
-  const organizeFilesByFolder = () => {
-    const fileSystem: Record<string, FileItem[]> = { 
-      '/': [] 
+  // Create a virtual file system
+  const fileSystem = useMemo(() => {
+    const root: FileSystemNode = {
+      name: 'root',
+      path: '',
+      type: 'folder',
+      children: {}
     };
     
+    // Process files and organize them into a tree structure
     files.forEach(file => {
       const parts = file.name.split('/');
-      if (parts.length === 1) {
-        fileSystem['/'].push(file);
-      } else {
-        const folderPath = parts.slice(0, -1).join('/');
-        if (!fileSystem[folderPath]) {
-          fileSystem[folderPath] = [];
+      let currentNode = root;
+      let currentPath = '';
+      
+      // Process each path segment except the last one (filename)
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+        
+        if (!currentNode.children[part]) {
+          currentNode.children[part] = {
+            name: part,
+            path: currentPath,
+            type: 'folder',
+            children: {}
+          };
         }
-        fileSystem[folderPath].push({
-          ...file,
-          name: parts[parts.length - 1]
-        });
+        
+        currentNode = currentNode.children[part];
       }
+      
+      // Add the file to the current folder
+      const fileName = parts[parts.length - 1];
+      currentNode.children[fileName] = {
+        name: fileName,
+        path: file.name,
+        type: 'file',
+        content: file.content,
+        children: {}
+      };
     });
     
-    return fileSystem;
+    return root;
+  }, [files]);
+  
+  const toggleFolder = (path: string) => {
+    setExpandedFolders(prev => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
   };
   
-  // In this simplified version, we'll just render files in a flat list
-  // but the structure is extensible for folder organization
+  // Recursive function to render file system nodes
+  const renderFileSystemNode = (node: FileSystemNode, depth = 0): React.ReactNode => {
+    const isFolder = node.type === 'folder';
+    const isExpanded = expandedFolders[node.path] !== false; // Default to expanded
+    const language = isFolder ? '' : getLanguageFromFilename(node.name);
+    const isSelected = selectedFile === node.path;
+    const paddingLeft = depth * 12;
+    
+    if (isFolder && node.name !== 'root') {
+      return (
+        <React.Fragment key={node.path}>
+          <ListItem 
+            disablePadding 
+            sx={{ display: 'block' }}
+          >
+            <ListItemButton
+              onClick={() => toggleFolder(node.path)}
+              sx={{ pl: 1 + paddingLeft/8, pr: 1 }}
+              dense
+            >
+              <ListItemIcon sx={{ minWidth: 28 }}>
+                {isExpanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText 
+                primary={
+                  <Box display="flex" alignItems="center">
+                    <FolderOutlined fontSize="small" sx={{ mr: 1, color: 'primary.light' }} />
+                    <Typography variant="body2" noWrap>{node.name}</Typography>
+                  </Box>
+                }
+              />
+            </ListItemButton>
+          </ListItem>
+          
+          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {Object.values(node.children)
+                .sort((a, b) => {
+                  // Folders first, then files
+                  if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                  return a.name.localeCompare(b.name);
+                })
+                .map(childNode => renderFileSystemNode(childNode, depth + 1))
+              }
+            </List>
+          </Collapse>
+        </React.Fragment>
+      );
+    } else if (node.type === 'file') {
+      return (
+        <ListItem
+          key={node.path}
+          disablePadding
+          secondaryAction={
+            <Tooltip title="Remove file">
+              <IconButton 
+                edge="end" 
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveFile(node.path);
+                }}
+                sx={{ 
+                  opacity: 0,
+                  transition: 'opacity 0.2s',
+                  '&:hover': { opacity: 1, color: 'error.main' },
+                  '.MuiListItemButton-root:hover &': { opacity: 0.7 }
+                }}
+              >
+                <DeleteOutline fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          }
+          sx={{ '.MuiListItemSecondaryAction-root': { right: 4 } }}
+        >
+          <ListItemButton
+            selected={isSelected}
+            onClick={() => onFileSelect(node.path)}
+            sx={{ 
+              pl: 1 + paddingLeft/8, 
+              pr: 6,
+              '&.Mui-selected': {
+                bgcolor: theme => alpha(theme.palette.primary.main, 0.15),
+                '&:hover': {
+                  bgcolor: theme => alpha(theme.palette.primary.main, 0.25),
+                }
+              }
+            }}
+            dense
+          >
+            <ListItemIcon sx={{ minWidth: 28 }}>
+              {language ? 
+                <LanguageIcon language={language} size={18} /> : 
+                <InsertDriveFileOutlined fontSize="small" />
+              }
+            </ListItemIcon>
+            <ListItemText 
+              primary={<Typography variant="body2" noWrap>{node.name}</Typography>}
+              sx={{ m: 0 }}
+            />
+          </ListItemButton>
+        </ListItem>
+      );
+    }
+    
+    // Special case for root node - just render its children
+    return (
+      <React.Fragment key={node.path || 'root'}>
+        {Object.values(node.children)
+          .sort((a, b) => {
+            // Folders first, then files
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          })
+          .map(childNode => renderFileSystemNode(childNode, depth))
+        }
+      </React.Fragment>
+    );
+  };
   
   return (
-    <div className="bg-gray-800 text-white h-full w-full rounded-lg overflow-hidden border border-gray-700">
-      <div 
-        className="px-3 py-2 bg-gray-900 border-b border-gray-700 flex items-center justify-between cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center space-x-2">
-          {expanded ? <FiChevronDown size={18} /> : <FiChevronRight size={18} />}
-          <span className="font-medium">EXPLORER</span>
-        </div>
-        <span className="text-xs text-gray-400">{files.length} file{files.length !== 1 ? 's' : ''}</span>
-      </div>
+    <StyledPaper>
+      <Header onClick={() => setExpanded(!expanded)}>
+        <Box display="flex" alignItems="center" gap={1}>
+          {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+          <Typography variant="subtitle2" fontWeight={500}>EXPLORER</Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary">
+          {files.length} file{files.length !== 1 ? 's' : ''}
+        </Typography>
+      </Header>
       
       {expanded && (
-        <div className="p-1 max-h-[calc(100vh-300px)] overflow-y-auto">
+        <Box sx={{ 
+          p: 0.5, 
+          maxHeight: 'calc(100vh - 300px)', 
+          overflow: 'auto',
+          bgcolor: 'background.paper'
+        }}>
           {files.length === 0 ? (
-            <div className="text-gray-500 text-sm p-2">
+            <Box p={1}>
+              <Typography variant="body2" color="text.secondary">
               No files uploaded yet
-            </div>
+              </Typography>
+            </Box>
           ) : (
-            <div>
-              {files.map((file) => {
-                const language = getLanguageFromFilename(file.name);
-                return (
-                  <div 
-                    key={file.name}
-                    className={`flex items-center justify-between p-1 px-2 rounded cursor-pointer text-sm hover:bg-gray-700 ${
-                      selectedFile === file.name ? 'bg-blue-900 bg-opacity-50' : ''
-                    }`}
-                    onClick={() => onFileSelect(file.name)}
-                  >
-                    <div className="flex items-center space-x-2 truncate">
-                      <LanguageIcon language={language} size={18} />
-                      <span className="truncate">{file.name}</span>
-                    </div>
-                    <button
-                      className="text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveFile(file.name);
-                      }}
-                      title="Remove file"
-                    >
-                      <FiTrash2 size={16} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            <List dense component="nav" disablePadding>
+              {renderFileSystemNode(fileSystem)}
+            </List>
           )}
-        </div>
+        </Box>
       )}
-    </div>
+    </StyledPaper>
   );
 };
 

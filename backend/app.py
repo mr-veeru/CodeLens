@@ -1,6 +1,7 @@
 """
 CodeLens Backend API
 A Flask-based REST API for code analysis and documentation generation.
+Provides endpoints for code analysis, language detection, and documentation generation.
 """
 
 from flask import Flask, request, jsonify, make_response
@@ -26,8 +27,9 @@ from pycparser import c_ast
 import ast
 # Comment out the problematic imports
 # from guesslang import Guess
+import math
 
-# Configure logging
+# Configure logging with rotation
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=3)
@@ -39,7 +41,7 @@ logger.addHandler(handler)
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
-# Generate a random API key for the app
+# Configure application secret key
 if not os.environ.get('FLASK_SECRET_KEY'):
     os.environ['FLASK_SECRET_KEY'] = secrets.token_hex(32)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY')
@@ -68,14 +70,22 @@ limiter = Limiter(
     storage_uri=os.environ.get("REDIS_URL", "memory://")
 )
 
-# Simple in-memory cache for demonstration
-# In production, use Redis or another distributed cache
+# In-memory cache configuration
 cache = {}
 CACHE_EXPIRY = 60 * 60  # 1 hour in seconds
 
 # Security headers middleware
 @app.after_request
 def add_security_headers(response):
+    """
+    Add security headers to all responses.
+    
+    Args:
+        response: Flask response object
+        
+    Returns:
+        Response with security headers added
+    """
     response.headers['Content-Security-Policy'] = "default-src 'self'"
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -85,6 +95,15 @@ def add_security_headers(response):
 
 # Cache decorator
 def cache_response(expire=CACHE_EXPIRY):
+    """
+    Decorator for caching API responses.
+    
+    Args:
+        expire (int): Cache expiration time in seconds
+        
+    Returns:
+        Decorated function with caching functionality
+    """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -120,6 +139,15 @@ def cache_response(expire=CACHE_EXPIRY):
 
 # Error handling decorator
 def handle_errors(f):
+    """
+    Decorator for handling errors in API endpoints.
+    
+    Args:
+        f: Function to decorate
+        
+    Returns:
+        Decorated function with error handling
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         try:
@@ -143,6 +171,15 @@ def handle_errors(f):
 
 # Input validation decorator
 def validate_input(f):
+    """
+    Decorator for validating API input.
+    
+    Args:
+        f: Function to decorate
+        
+    Returns:
+        Decorated function with input validation
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not request.is_json:
@@ -171,6 +208,9 @@ def detect_file_type(filename: str, content: str) -> str:
         
     Returns:
         str: Detected programming language
+        
+    Note:
+        Uses both file extension and content analysis for accurate detection
     """
     if filename:
         name_lower = filename.lower()
@@ -222,7 +262,19 @@ def detect_file_type(filename: str, content: str) -> str:
     return 'Unknown'
 
 def detect_ml_code(content: str, language: str) -> dict:
-    """Detect if the code contains machine learning frameworks and patterns."""
+    """
+    Detect if the code contains machine learning frameworks and patterns.
+    
+    Args:
+        content (str): Code content to analyze
+        language (str): Detected programming language
+        
+    Returns:
+        dict: Dictionary containing ML detection results:
+            - is_ml_code (bool): Whether the code contains ML patterns
+            - frameworks (list): List of detected ML frameworks
+            - operations (list): List of detected ML operations
+    """
     ml_info = {
         'is_ml_code': False,
         'frameworks': [],
@@ -248,152 +300,143 @@ def detect_ml_code(content: str, language: str) -> dict:
     }
     
     # Detect frameworks
-    for framework, keywords in ml_frameworks.items():
-        if any(keyword in content for keyword in keywords):
+    for framework, patterns in ml_frameworks.items():
+        if any(pattern in content for pattern in patterns):
             ml_info['frameworks'].append(framework)
+            ml_info['is_ml_code'] = True
     
     # Detect operations
-    for operation, keywords in ml_operations.items():
-        if any(keyword in content for keyword in keywords):
+    for operation, patterns in ml_operations.items():
+        if any(pattern in content for pattern in patterns):
             ml_info['operations'].append(operation)
-    
-    # Determine if it's ML code
-    ml_info['is_ml_code'] = bool(ml_info['frameworks'] or ml_info['operations'])
+            ml_info['is_ml_code'] = True
     
     return ml_info
 
 def analyze_python_structure(content: str) -> dict:
-    """Analyze Python code structure using the ast module."""
-    analysis = {
-        'imports': [],
-        'classes': [],
-        'functions': [],
-        'total_functions': 0,
-        'total_classes': 0
-    }
+    """
+    Analyze the structure of Python code.
     
-    try:
-        parsed = ast.parse(content)
+    Args:
+        content (str): Python code content
         
-        for node in ast.walk(parsed):
-            # Analyze imports
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.Import):
-                    for name in node.names:
-                        analysis['imports'].append(name.name)
-                else:  # ImportFrom
-                    module = node.module or ''
-                    for name in node.names:
-                        analysis['imports'].append(f"{module}.{name.name}")
-            
-            # Analyze classes
-            elif isinstance(node, ast.ClassDef):
-                class_info = {
-                    'name': node.name,
-                    'methods': [m.name for m in node.body if isinstance(m, ast.FunctionDef)],
-                    'line_number': node.lineno
-                }
-                analysis['classes'].append(class_info)
-                analysis['total_classes'] += 1
-            
-            # Analyze functions
-            elif isinstance(node, ast.FunctionDef):
-                # Check if parent is not a class definition
-                is_method = False
-                for parent in ast.walk(parsed):
-                    if isinstance(parent, ast.ClassDef) and node in parent.body:
-                        is_method = True
-                        break
-                
-                if not is_method:
-                    function_info = {
-                        'name': node.name,
-                        'args': len(node.args.args) if hasattr(node.args, 'args') else 0,
-                        'line_number': node.lineno
-                    }
-                    analysis['functions'].append(function_info)
-                    analysis['total_functions'] += 1
-    except SyntaxError:
-        # If there's a syntax error, fall back to simpler analysis
-        pass
-    
-    return analysis
+    Returns:
+        dict: Dictionary containing code structure analysis:
+            - total_lines (int): Total number of lines
+            - empty_lines (int): Number of empty lines
+            - comment_lines (int): Number of comment lines
+            - import_statements (int): Number of import statements
+            - function_definitions (int): Number of function definitions
+            - class_definitions (int): Number of class definitions
+            - variable_declarations (int): Number of variable declarations
+            - loops (int): Number of loop statements
+            - conditionals (int): Number of conditional statements
+    """
+    try:
+        tree = ast.parse(content)
+        structure = {
+            'total_lines': len(content.splitlines()),
+            'empty_lines': content.count('\n\n'),
+            'comment_lines': content.count('#'),
+            'import_statements': len([node for node in ast.walk(tree) if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom)]),
+            'function_definitions': len([node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]),
+            'class_definitions': len([node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]),
+            'variable_declarations': len([node for node in ast.walk(tree) if isinstance(node, ast.Assign)]),
+            'loops': len([node for node in ast.walk(tree) if isinstance(node, (ast.For, ast.While))]),
+            'conditionals': len([node for node in ast.walk(tree) if isinstance(node, ast.If)])
+        }
+        return structure
+    except Exception as e:
+        logger.error(f"Error analyzing Python structure: {str(e)}")
+        return {
+            'total_lines': len(content.splitlines()),
+            'empty_lines': content.count('\n\n'),
+            'comment_lines': content.count('#'),
+            'import_statements': 0,
+            'function_definitions': 0,
+            'class_definitions': 0,
+            'variable_declarations': 0,
+            'loops': 0,
+            'conditionals': 0
+        }
 
 def analyze_c_structure(content: str) -> dict:
-    """Analyze C code structure using simple regex patterns instead of pycparser."""
-    analysis = {
-        'functions': [],
-        'structs': [],
-        'total_functions': 0,
-        'total_structs': 0
-    }
+    """
+    Analyze the structure of C code.
     
-    try:
-        # Use regex to find function definitions
-        function_pattern = r'\b(\w+)\s+(\w+)\s*\([^)]*\)\s*\{'
-        for match in re.finditer(function_pattern, content):
-            # Skip if return type is if, for, while, etc.
-            if match.group(1) not in ['if', 'for', 'while', 'switch']:
-                analysis['functions'].append({
-                    'name': match.group(2),
-                    'line_number': content[:match.start()].count('\n') + 1
-                })
-                analysis['total_functions'] += 1
+    Args:
+        content (str): C code content
         
-        # Use regex to find struct definitions
-        struct_pattern = r'struct\s+(\w+)\s*\{'
-        for match in re.finditer(struct_pattern, content):
-            analysis['structs'].append({
-                'name': match.group(1),
-                'line_number': content[:match.start()].count('\n') + 1
-            })
-            analysis['total_structs'] += 1
-            
+    Returns:
+        dict: Dictionary containing code structure analysis:
+            - total_lines (int): Total number of lines
+            - empty_lines (int): Number of empty lines
+            - comment_lines (int): Number of comment lines
+            - import_statements (int): Number of include statements
+            - function_definitions (int): Number of function definitions
+            - class_definitions (int): Number of struct/union definitions
+            - variable_declarations (int): Number of variable declarations
+            - loops (int): Number of loop statements
+            - conditionals (int): Number of conditional statements
+    """
+    try:
+        parser = pycparser.c_parser.CParser()
+        ast = parser.parse(content)
+        
+        structure = {
+            'total_lines': len(content.splitlines()),
+            'empty_lines': content.count('\n\n'),
+            'comment_lines': content.count('//') + content.count('/*'),
+            'import_statements': len([node for node in ast.ext if isinstance(node, pycparser.c_ast.Include)]),
+            'function_definitions': len([node for node in ast.ext if isinstance(node, pycparser.c_ast.FuncDef)]),
+            'class_definitions': len([node for node in ast.ext if isinstance(node, (pycparser.c_ast.Struct, pycparser.c_ast.Union))]),
+            'variable_declarations': len([node for node in ast.ext if isinstance(node, pycparser.c_ast.Decl)]),
+            'loops': content.count('for') + content.count('while'),
+            'conditionals': content.count('if') + content.count('switch')
+        }
+        return structure
     except Exception as e:
-        # If parsing fails, just log the error and return the basic analysis
-        logger.error(f"Error analyzing C code: {str(e)}")
-    
-    return analysis
+        logger.error(f"Error analyzing C structure: {str(e)}")
+        return {
+            'total_lines': len(content.splitlines()),
+            'empty_lines': content.count('\n\n'),
+            'comment_lines': content.count('//') + content.count('/*'),
+            'import_statements': content.count('#include'),
+            'function_definitions': content.count('{') - content.count('}'),  # Rough estimate
+            'class_definitions': content.count('struct') + content.count('union'),
+            'variable_declarations': content.count(';') - content.count('for') - content.count('while'),
+            'loops': content.count('for') + content.count('while'),
+            'conditionals': content.count('if') + content.count('switch')
+        }
 
 def analyze_code_structure(code: str, file_type: str) -> dict:
-    """Analyze code structure and patterns with enhanced features."""
-    if file_type in ['JSON', 'Environment Variables', 'YAML', 'XML', 'TOML', 'Configuration File', 'Markdown', 'Ignore File']:
-        return analyze_config_file(code, file_type)
+    """
+    Analyze the structure of code based on its type.
     
-    lines = code.split('\n')
-    analysis = {
-        'total_lines': len(lines),
-        'empty_lines': sum(1 for line in lines if not line.strip()),
-        'comment_lines': sum(1 for line in lines if line.strip().startswith(('//', '/*', '*', '#'))),
-        'import_statements': sum(1 for line in lines if re.match(r'^\s*(import|from|require|using)\s+', line.strip())),
-        'function_definitions': sum(1 for line in lines if re.search(r'(function\s+\w+|\w+\s*:\s*function|\w+\s*=\s*\(.*\)\s*=>|def\s+\w+)', line.strip())),
-        'class_definitions': sum(1 for line in lines if re.search(r'(class\s+\w+|interface\s+\w+|type\s+\w+\s*=)', line.strip())),
-        'variable_declarations': sum(1 for line in lines if re.match(r'^\s*(var|let|const|int|float|string|bool|\w+:\s*\w+)\s+\w+', line.strip())),
-        'loops': sum(1 for line in lines if re.search(r'\b(for|while|do)\b', line.strip())),
-        'conditionals': sum(1 for line in lines if re.search(r'\b(if|else|switch|case)\b', line.strip()))
-    }
-    
-    # Add enhanced language-specific analysis
+    Args:
+        code (str): Code content to analyze
+        file_type (str): Type of the code file
+        
+    Returns:
+        dict: Dictionary containing code structure analysis
+    """
     if file_type == 'Python':
-        python_analysis = analyze_python_structure(code)
-        analysis.update({
-            'detailed_structure': python_analysis
-        })
+        return analyze_python_structure(code)
     elif file_type in ['C', 'C++']:
-        c_analysis = analyze_c_structure(code)
-        analysis.update({
-            'detailed_structure': c_analysis
-        })
-    
-    # Detect if code is ML-related
-    ml_info = detect_ml_code(code, file_type)
-    if ml_info['is_ml_code']:
-        analysis.update({
-            'ml_frameworks': ml_info['frameworks'],
-            'ml_operations': ml_info['operations']
-        })
-    
-    return analysis
+        return analyze_c_structure(code)
+    else:
+        # Generic analysis for other languages
+        return {
+            'total_lines': len(code.splitlines()),
+            'empty_lines': code.count('\n\n'),
+            'comment_lines': code.count('//') + code.count('/*') + code.count('#'),
+            'import_statements': code.count('import') + code.count('require') + code.count('#include'),
+            'function_definitions': code.count('function') + code.count('def') + code.count('void') + code.count('int'),
+            'class_definitions': code.count('class') + code.count('struct'),
+            'variable_declarations': code.count('let') + code.count('const') + code.count('var') + code.count('int') + code.count('float'),
+            'loops': code.count('for') + code.count('while'),
+            'conditionals': code.count('if') + code.count('switch')
+        }
 
 def analyze_config_file(content: str, file_type: str) -> dict:
     """Analyze configuration and data files."""
@@ -826,6 +869,159 @@ def generate_documented_code(code: str, language: str, structure: dict) -> str:
         i += 1
     
     return '\n'.join(documented_lines)
+
+def generate_code_summary(code: str, file_type: str) -> dict:
+    """
+    Generate a summary of the code content.
+    
+    Args:
+        code (str): Code content to analyze
+        file_type (str): Type of the code file
+        
+    Returns:
+        dict: Dictionary containing code summary:
+            - language (str): Detected programming language
+            - ml_info (dict): Machine learning related information
+            - structure (dict): Code structure analysis
+            - complexity (dict): Code complexity metrics
+    """
+    try:
+        # Detect language if not provided
+        if not file_type:
+            file_type = detect_file_type('', code)
+        
+        # Get ML information
+        ml_info = detect_ml_code(code, file_type)
+        
+        # Analyze code structure
+        structure = analyze_code_structure(code, file_type)
+        
+        # Calculate complexity metrics
+        complexity = {
+            'cyclomatic_complexity': calculate_cyclomatic_complexity(code),
+            'cognitive_complexity': calculate_cognitive_complexity(code),
+            'maintainability_index': calculate_maintainability_index(structure)
+        }
+        
+        return {
+            'language': file_type,
+            'ml_info': ml_info,
+            'structure': structure,
+            'complexity': complexity
+        }
+    except Exception as e:
+        logger.error(f"Error generating code summary: {str(e)}")
+        return {
+            'language': file_type or 'Unknown',
+            'ml_info': {'is_ml_code': False, 'frameworks': [], 'operations': []},
+            'structure': {
+                'total_lines': len(code.splitlines()),
+                'empty_lines': 0,
+                'comment_lines': 0,
+                'import_statements': 0,
+                'function_definitions': 0,
+                'class_definitions': 0,
+                'variable_declarations': 0,
+                'loops': 0,
+                'conditionals': 0
+            },
+            'complexity': {
+                'cyclomatic_complexity': 0,
+                'cognitive_complexity': 0,
+                'maintainability_index': 0
+            }
+        }
+
+def calculate_cyclomatic_complexity(code: str) -> int:
+    """
+    Calculate the cyclomatic complexity of the code.
+    
+    Args:
+        code (str): Code content to analyze
+        
+    Returns:
+        int: Cyclomatic complexity score
+    """
+    try:
+        # Count decision points
+        decision_points = (
+            code.count('if') + code.count('else') +
+            code.count('for') + code.count('while') +
+            code.count('case') + code.count('catch') +
+            code.count('&&') + code.count('||') +
+            code.count('?')  # ternary operator
+        )
+        return decision_points + 1  # Base complexity is 1
+    except Exception as e:
+        logger.error(f"Error calculating cyclomatic complexity: {str(e)}")
+        return 1
+
+def calculate_cognitive_complexity(code: str) -> int:
+    """
+    Calculate the cognitive complexity of the code.
+    
+    Args:
+        code (str): Code content to analyze
+        
+    Returns:
+        int: Cognitive complexity score
+    """
+    try:
+        # Count nested structures and breaks in linear flow
+        complexity = 0
+        nesting_level = 0
+        
+        for line in code.splitlines():
+            # Increase complexity for nested structures
+            if any(keyword in line for keyword in ['if', 'for', 'while', 'switch']):
+                complexity += (1 + nesting_level)
+                nesting_level += 1
+            elif '}' in line:
+                nesting_level = max(0, nesting_level - 1)
+            
+            # Increase complexity for breaks in linear flow
+            if any(keyword in line for keyword in ['break', 'continue', 'return', 'throw']):
+                complexity += 1
+        
+        return complexity
+    except Exception as e:
+        logger.error(f"Error calculating cognitive complexity: {str(e)}")
+        return 0
+
+def calculate_maintainability_index(structure: dict) -> float:
+    """
+    Calculate the maintainability index of the code.
+    
+    Args:
+        structure (dict): Code structure analysis
+        
+    Returns:
+        float: Maintainability index score (0-100)
+    """
+    try:
+        # Calculate Halstead volume
+        total_lines = structure['total_lines']
+        if total_lines == 0:
+            return 100.0
+            
+        # Calculate comment ratio
+        comment_ratio = structure['comment_lines'] / total_lines
+        
+        # Calculate cyclomatic complexity per line
+        complexity_per_line = (
+            structure['loops'] + 
+            structure['conditionals'] + 
+            structure['function_definitions']
+        ) / total_lines
+        
+        # Calculate maintainability index
+        mi = 171 - 5.2 * math.log(complexity_per_line) - 0.23 * math.log(total_lines) - 16.2 * math.log(comment_ratio)
+        
+        # Normalize to 0-100 scale
+        return max(0, min(100, mi))
+    except Exception as e:
+        logger.error(f"Error calculating maintainability index: {str(e)}")
+        return 0.0
 
 @app.route('/api/analyze', methods=['POST'])
 @limiter.limit("10 per minute")

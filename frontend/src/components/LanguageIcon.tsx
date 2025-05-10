@@ -1,3 +1,9 @@
+/**
+ * LanguageIcon Component
+ * Renders appropriate programming language icons with consistent styling.
+ * Supports a wide range of programming languages and file types with fallback options.
+ */
+
 import React from 'react';
 import { 
   SiJavascript, SiTypescript, SiPython, SiCplusplus, 
@@ -10,22 +16,41 @@ import { VscTerminalBash, VscCode } from 'react-icons/vsc';
 import { FiFile, FiSettings } from 'react-icons/fi';
 import { AiOutlineConsoleSql } from 'react-icons/ai';
 
+/**
+ * Props interface for the LanguageIcon component
+ */
 interface LanguageIconProps {
+  /** Name of the programming language or file type */
   language: string;
+  /** Size of the icon in pixels (default: 24) */
   size?: number;
+  /** Additional CSS classes to apply to the icon */
   className?: string;
 }
 
+/**
+ * LanguageIcon Component
+ * Renders an icon representing the specified programming language or file type.
+ * Includes color-coded icons for better visual identification.
+ * 
+ * @param language - Name of the programming language or file type
+ * @param size - Size of the icon in pixels (default: 24)
+ * @param className - Additional CSS classes to apply to the icon
+ * @returns React component with the appropriate language icon
+ */
 const LanguageIcon: React.FC<LanguageIconProps> = ({ 
   language, 
   size = 24,
   className = ""
 }) => {
-  // Map language names to their respective icons
+  /**
+   * Maps language names to their respective icons with appropriate styling
+   * @returns React component with the language-specific icon
+   */
   const getIcon = () => {
     const iconProps = { size, className: `inline-block ${className}` };
     
-    // Normalize language name for matching
+    // Normalize language name for case-insensitive matching
     const lang = language.toLowerCase();
     
     if (lang.includes('javascript') || lang === 'js') {
@@ -77,7 +102,7 @@ const LanguageIcon: React.FC<LanguageIconProps> = ({
     } else if (lang.includes('config') || lang.includes('environment') || lang.includes('env')) {
       return <FiSettings {...iconProps} className={`${iconProps.className} text-gray-500`} />;
     } else {
-      // Default fallback
+      // Default fallback icon for unknown languages
       return <VscCode {...iconProps} className={`${iconProps.className} text-gray-500`} />;
     }
   };

@@ -1,10 +1,21 @@
+/**
+ * CodeSummaryCard Component
+ * Displays a comprehensive summary of analyzed code, including:
+ * - Language detection and ML framework identification
+ * - Code structure statistics
+ * - Code density metrics
+ * - ML-specific information (if applicable)
+ */
+
 import React from 'react';
 import LanguageIcon from './LanguageIcon';
 import { FiCpu, FiCode, FiFileText } from 'react-icons/fi';
 import { Paper, Box, Typography, Chip, Divider, Grid } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
-// Styled components
+/**
+ * Styled components for the code summary card UI
+ */
 const StyledPaper = styled(Paper)(({ theme }) => ({
   borderRadius: theme.shape.borderRadius,
   overflow: 'hidden',
@@ -31,12 +42,21 @@ const StatsCard = styled(Box)(({ theme }) => ({
   padding: theme.spacing(1),
 }));
 
+/**
+ * Props interface for the CodeSummaryCard component
+ */
 interface CodeSummaryCardProps {
+  /** Detected programming language */
   language: string;
+  /** AI-generated explanation of the code */
   explanation: string;
+  /** Flag indicating if the code contains ML-related code */
   isMlCode?: boolean;
+  /** List of detected ML frameworks */
   mlFrameworks?: string[];
+  /** List of detected ML operations */
   mlOperations?: string[];
+  /** Code structure analysis results */
   structure: {
     total_lines: number;
     empty_lines: number;
@@ -50,6 +70,17 @@ interface CodeSummaryCardProps {
   };
 }
 
+/**
+ * CodeSummaryCard Component
+ * Renders a detailed summary of analyzed code with statistics and metrics
+ * 
+ * @param language - Detected programming language
+ * @param explanation - AI-generated code explanation
+ * @param isMlCode - Whether the code contains ML-related code
+ * @param mlFrameworks - List of detected ML frameworks
+ * @param mlOperations - List of detected ML operations
+ * @param structure - Code structure analysis results
+ */
 const CodeSummaryCard: React.FC<CodeSummaryCardProps> = ({
   language,
   explanation,
@@ -58,7 +89,7 @@ const CodeSummaryCard: React.FC<CodeSummaryCardProps> = ({
   mlOperations = [],
   structure
 }) => {
-  // Calculate code density: (total-empty-comments)/total
+  // Calculate code density as percentage of non-empty, non-comment lines
   const codeDensity = structure.total_lines > 0 
     ? Math.round(((structure.total_lines - structure.empty_lines - structure.comment_lines) / structure.total_lines) * 100) 
     : 0;

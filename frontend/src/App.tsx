@@ -1,6 +1,6 @@
 /**
- * CodeLens Frontend Application
- * A React-based web application for code analysis and documentation.
+ * CodeLens - AI-powered code analysis and documentation tool
+ * Frontend application built with React and Material-UI
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -52,8 +52,8 @@ const darkTheme = createTheme({
 });
 
 /**
- * Error Boundary Component
- * Catches JavaScript errors in child components and displays a fallback UI
+ * ErrorBoundary - Catches and handles runtime errors in child components
+ * Provides a fallback UI when errors occur
  */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: { children: React.ReactNode }) {
@@ -92,8 +92,9 @@ const LoadingSpinner = () => (
 );
 
 /**
- * Toast Notification Component
- * Displays temporary notifications to the user
+ * Toast - Displays temporary notifications with auto-dismiss functionality
+ * @param message - The notification message to display
+ * @param onClose - Callback function when toast is dismissed
  */
 const Toast = ({ message, onClose }: { message: string; onClose: () => void }) => {
   useEffect(() => {
@@ -117,8 +118,13 @@ const Toast = ({ message, onClose }: { message: string; onClose: () => void }) =
 };
 
 /**
- * Code Editor Component
- * Provides a text area for code input with language detection and analysis capabilities
+ * CodeEditor - Interactive code input component with language detection
+ * @param code - Current code content
+ * @param onChange - Handler for code changes
+ * @param selectedFile - Currently selected file name
+ * @param language - Detected programming language
+ * @param onAnalyze - Handler for code analysis
+ * @param loading - Loading state indicator
  */
 const CodeEditor = ({ 
   code, 
@@ -175,8 +181,10 @@ const CodeEditor = ({
 };
 
 /**
- * Documented Code Viewer Component
- * Displays code with syntax highlighting and documentation
+ * DocumentedCodeViewer - Displays code with syntax highlighting and documentation
+ * @param documentedCode - Code with added documentation
+ * @param language - Programming language for syntax highlighting
+ * @param onCopy - Handler for copying code to clipboard
  */
 const DocumentedCodeViewer = ({
   documentedCode,

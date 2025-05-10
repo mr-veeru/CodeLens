@@ -1,11 +1,16 @@
+/**
+ * FileExplorer Component
+ * A hierarchical file explorer that displays uploaded files in a tree structure.
+ * Supports file selection, removal, and language detection based on file extensions.
+ */
+
 import React, { useState, useMemo } from 'react';
 import LanguageIcon from './LanguageIcon';
 import { 
   ChevronRight, 
   ExpandMore, 
   FolderOutlined, 
-  DeleteOutline,
-  InsertDriveFileOutlined
+  DeleteOutline
 } from '@mui/icons-material';
 import { 
   Box, 
@@ -23,7 +28,9 @@ import {
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
-// Styled components
+/**
+ * Styled components for the file explorer UI
+ */
 const StyledPaper = styled(Paper)(({ theme }) => ({
   height: '100%',
   width: '100%',
@@ -42,6 +49,9 @@ const Header = styled(Box)(({ theme }) => ({
   cursor: 'pointer',
 }));
 
+/**
+ * Interface definitions for component props and data structures
+ */
 interface FileItem {
   name: string;
   content: string;
@@ -54,7 +64,9 @@ interface FileExplorerProps {
   onRemoveFile: (fileName: string) => void;
 }
 
-// Virtual file system for organizing files by folders
+/**
+ * Represents a node in the virtual file system tree
+ */
 interface FileSystemNode {
   name: string;
   path: string;
@@ -63,6 +75,19 @@ interface FileSystemNode {
   children: Record<string, FileSystemNode>;
 }
 
+/**
+ * FileExplorer Component
+ * Renders a hierarchical file explorer with support for:
+ * - File/folder tree visualization
+ * - File selection and removal
+ * - Language detection
+ * - Collapsible folders
+ * 
+ * @param files - Array of files to display
+ * @param selectedFile - Currently selected file path
+ * @param onFileSelect - Callback when a file is selected
+ * @param onRemoveFile - Callback when a file is removed
+ */
 const FileExplorer: React.FC<FileExplorerProps> = ({ 
   files, 
   selectedFile, 
@@ -72,7 +97,11 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   const [expanded, setExpanded] = useState(true);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   
-  // Determine language from file extension
+  /**
+   * Determines the programming language based on file extension
+   * @param filename - Name of the file to analyze
+   * @returns Detected programming language
+   */
   const getLanguageFromFilename = (filename: string): string => {
     const ext = filename.split('.').pop()?.toLowerCase() || '';
     
@@ -107,7 +136,10 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     return extensionMap[ext] || 'Plain Text';
   };
   
-  // Create a virtual file system
+  /**
+   * Creates a virtual file system tree from the flat file list
+   * @returns Root node of the file system tree
+   */
   const fileSystem = useMemo(() => {
     const root: FileSystemNode = {
       name: 'root',
@@ -153,6 +185,10 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     return root;
   }, [files]);
   
+  /**
+   * Toggles the expanded state of a folder
+   * @param path - Path of the folder to toggle
+   */
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => ({
       ...prev,
@@ -160,7 +196,12 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     }));
   };
   
-  // Recursive function to render file system nodes
+  /**
+   * Recursively renders a file system node and its children
+   * @param node - Current node to render
+   * @param depth - Current depth in the tree
+   * @returns React node representing the file system node
+   */
   const renderFileSystemNode = (node: FileSystemNode, depth = 0): React.ReactNode => {
     const isFolder = node.type === 'folder';
     const isExpanded = expandedFolders[node.path] !== false; // Default to expanded
@@ -248,70 +289,52 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
                 }
               }
             }}
-            dense
           >
             <ListItemIcon sx={{ minWidth: 28 }}>
-              {language ? 
-                <LanguageIcon language={language} size={18} /> : 
-                <InsertDriveFileOutlined fontSize="small" />
-              }
+              <LanguageIcon language={language} size={16} />
             </ListItemIcon>
             <ListItemText 
-              primary={<Typography variant="body2" noWrap>{node.name}</Typography>}
-              sx={{ m: 0 }}
+              primary={
+                <Typography variant="body2" noWrap>
+                  {node.name}
+                </Typography>
+              }
             />
           </ListItemButton>
         </ListItem>
       );
     }
     
-    // Special case for root node - just render its children
-    return (
-      <React.Fragment key={node.path || 'root'}>
-        {Object.values(node.children)
-          .sort((a, b) => {
-            // Folders first, then files
-            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-            return a.name.localeCompare(b.name);
-          })
-          .map(childNode => renderFileSystemNode(childNode, depth))
-        }
-      </React.Fragment>
-    );
+    return null;
   };
-  
+
   return (
-    <StyledPaper>
+    <StyledPaper elevation={0}>
       <Header onClick={() => setExpanded(!expanded)}>
-        <Box display="flex" alignItems="center" gap={1}>
-          {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
-          <Typography variant="subtitle2" fontWeight={500}>EXPLORER</Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary">
-          {files.length} file{files.length !== 1 ? 's' : ''}
+        <Typography variant="subtitle2" color="text.secondary">
+          Files
         </Typography>
       </Header>
       
-      {expanded && (
-        <Box sx={{ 
-          p: 0.5, 
-          maxHeight: 'calc(100vh - 300px)', 
-          overflow: 'auto',
-          bgcolor: 'background.paper'
-        }}>
-          {files.length === 0 ? (
-            <Box p={1}>
-              <Typography variant="body2" color="text.secondary">
-              No files uploaded yet
-              </Typography>
-            </Box>
-          ) : (
-            <List dense component="nav" disablePadding>
-              {renderFileSystemNode(fileSystem)}
-            </List>
-          )}
-        </Box>
-      )}
+      <Collapse in={expanded}>
+        <List
+          component="nav"
+          sx={{
+            width: '100%',
+            maxHeight: 'calc(100vh - 200px)',
+            overflow: 'auto',
+            py: 0
+          }}
+        >
+          {Object.values(fileSystem.children)
+            .sort((a, b) => {
+              if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            })
+            .map(node => renderFileSystemNode(node))
+          }
+        </List>
+      </Collapse>
     </StyledPaper>
   );
 };
